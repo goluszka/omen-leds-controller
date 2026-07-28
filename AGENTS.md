@@ -73,6 +73,15 @@ with open_lighting() as lights:
 As a subprocess: `omen-led fill '#00ff00'`, `omen-led off`, `--dry-run` on
 anything to see the bytes without sending.
 
+`examples/` holds three animations — `pulse`, `alarm`, `police` — each keeping
+its pattern in a pure generator that yields `(pixels, hold_seconds)`. Copy that
+shape: it makes an animation testable without hardware, which is otherwise
+impossible here since nothing can be read back.
+
+`remembered_frame()` returns the last picture set through the CLI, brightness
+already applied, for restoring the display after a transient animation. It can
+only ever mean the last picture *requested*, not what is physically lit.
+
 For animation, call `render(verify=False)` — the acknowledgement readback costs
 ~150 ms per plane and is not worth it per frame. There is also a 50 ms minimum
 between writes in `safety.RateLimiter`; raise it via `Transport(min_interval=…)`
@@ -132,7 +141,7 @@ the REFUTED section of `docs/protocol.md`.
 ## Verifying your changes
 
 ```sh
-python3 -m pytest tests/ -q          # 392 tests, no hardware needed
+python3 -m pytest tests/ -q          # 421 tests, no hardware needed
 python3 -m omenled.cli --dry-run fill red    # shows exact bytes
 ```
 

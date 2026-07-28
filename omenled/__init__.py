@@ -30,6 +30,7 @@ from .protocol import (
     plane_packet,
     scale,
 )
+from .state import remembered_frame
 from .transport import DeviceNotFound, Transport, TransportError, describe
 
 __version__ = "0.1.0"
@@ -43,6 +44,7 @@ __all__ = [
     "parse_colour",
     "gradient",
     "scale",
+    "remembered_frame",
     # device facts
     "LED_COUNT",
     "DATA_FIRST",

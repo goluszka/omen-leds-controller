@@ -16,7 +16,7 @@ from typing import List, Optional, Tuple
 
 Pixel = Tuple[int, int, int]
 
-from . import paths
+from . import paths, protocol
 
 
 def save(pixels: List[Pixel], brightness: int, path: Optional[str] = None) -> None:
@@ -47,3 +47,25 @@ def load(path: Optional[str] = None) -> Optional[Tuple[List[Pixel], int]]:
         return pixels, int(data["brightness"])
     except (OSError, ValueError, KeyError, TypeError):
         return None
+
+
+def remembered_frame(count: Optional[int] = None) -> Optional[List[Pixel]]:
+    """The last picture the user asked for, ready to render, or None.
+
+    Brightness is already applied, so the result can go straight to
+    `Lighting.set_all`. Use this to restore the display after a transient
+    animation.
+
+    "Previous state" can only ever mean *the last picture requested*, not what
+    is physically lit: the monitor cannot be read back, so nothing else is
+    knowable. An animation that runs and exits therefore leaves this untouched
+    rather than recording its own frames.
+    """
+    loaded = load()
+    if loaded is None:
+        return None
+    pixels, brightness = loaded
+    frame = protocol.scale(pixels, brightness)
+    if count is None:
+        return frame
+    return (frame + [(0, 0, 0)] * count)[:count]

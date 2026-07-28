@@ -184,12 +184,19 @@ class TestExamples:
             py_compile.compile(path, doraise=True)
 
     def test_they_import_from_the_public_surface(self):
+        """Examples must model correct usage, so they may only use __all__.
+
+        Parsed with ast rather than by splitting lines: the first version of
+        this check read `from omenled import (` as importing a name called "(".
+        """
+        import ast
+
         for path in self._examples():
-            source = open(path, encoding="utf-8").read()
-            for line in source.splitlines():
-                if line.startswith("from omenled import"):
-                    for name in line.split("import", 1)[1].split(","):
-                        assert name.strip() in omenled.__all__, f"{name} in {path}"
+            tree = ast.parse(open(path, encoding="utf-8").read(), filename=path)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module == "omenled":
+                    for alias in node.names:
+                        assert alias.name in omenled.__all__, f"{alias.name} in {path}"
 
 
 class TestWriteInterval:

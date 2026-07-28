@@ -96,7 +96,19 @@ covers driving the lighting from a native macOS app, including the one framing
 difference between hidapi and `IOHIDDeviceSetReport` that silently shifts every
 LED by one.
 
-`examples/pulse.py` is a working animation showing the render loop.
+Runnable animations in `examples/`, each with its pattern as a pure generator
+so the shape can be tested without the monitor:
+
+| | |
+|---|---|
+| `pulse.py` | breathing fade; ends dark |
+| `alarm.py` | urgent flash in `#9E0000`, then **restores the previous picture** |
+| `police.py` | red/blue strobe across the two halves of the strip |
+
+`alarm` and `police` restore the last picture set through the CLI when they
+finish, including on Ctrl-C. "Previous" can only mean the last picture
+*requested* — the monitor cannot be read back — which is what
+`remembered_frame()` returns.
 
 ## Layout
 
@@ -117,7 +129,7 @@ legacy/          An earlier attempt's scripts. Read the REFUTED section of
 ```
 
 ```sh
-python3 -m pytest tests/ -q      # 397 tests, no hardware needed
+python3 -m pytest tests/ -q      # 421 tests, no hardware needed
 ```
 
 ## Still open
