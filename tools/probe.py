@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from typing import Dict, List, Optional
 
@@ -306,6 +307,182 @@ def cmd_release(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------
+# curated experiments
+# --------------------------------------------------------------------------
+
+# Patterns the answers get classified by. Polish included because that is what
+# gets typed under time pressure.
+#
+# These are anchored at word boundaries rather than matched as substrings, and
+# that is not fussiness: "flickered" contains "red", so a substring match reads
+# an ambiguous answer as a confirmed colour and manufactures evidence. A decode
+# that misreads its own observations is worse than one with no observations.
+COLOUR_WORDS = {
+    "red": r"\b(red\w*|czerwon\w*)",
+    "green": r"\b(green\w*|zielon\w*)",
+    "blue": r"\b(blue\w*|niebiesk\w*)",
+    "white": r"\b(white\w*|bia[lł]\w*)",
+    "off": r"\b(off|out|dark\w*|black\w*|zgas\w*|zgaś\w*|wy[lł][aą]cz\w*|ciemn\w*)\b",
+    "nothing": r"\b(nothing|no change|no visible|nic|bez zmian)\b",
+}
+
+
+def classify(answer: str) -> List[str]:
+    """Which outcomes an answer reports. Empty means 'could not tell'.
+
+    Returning nothing is a valid and useful result — the verdicts treat an
+    unclassifiable answer as unclear rather than guessing at it.
+    """
+    low = answer.lower()
+    return [name for name, pattern in COLOUR_WORDS.items() if re.search(pattern, low)]
+
+
+def _step(link, journal, label: str, packets: List[bytes], question: str,
+          timeout: int) -> str:
+    """Send one or more packets as a single unit, then ask what happened.
+
+    Packets in one step are sent without an intervening prompt, which is how a
+    stage-then-commit pair gets tested as one action.
+    """
+    for i, payload in enumerate(packets):
+        print(f"  TX: {hexs(payload[:12])}")
+        show(link.exchange(payload, timeout_ms=timeout, label=f"{label}:{i}"))
+    answer = ask(question)
+    journal.observation(answer, label=label)
+    return answer
+
+
+def exp_commit(link, journal, timeout: int) -> Dict[str, str]:
+    """Is 0x0d an 'off' command, or the commit half of a stage/commit pair?
+
+    The distinction decides the entire write model, so it is resolved before
+    any effort goes into mapping zones or colours.
+    """
+    red = protocol.build_probe(r=0xFF, opcode=0x0D)
+    green = protocol.build_probe(g=0xFF, opcode=0x0D)
+    stage_blue = protocol.build_probe(b=0xFF, opcode=0x01)
+    commit_black = protocol.build_probe(opcode=0x0D)
+    white_05 = protocol.build_probe(r=0xFF, g=0xFF, b=0xFF, opcode=0x05)
+
+    answers: Dict[str, str] = {}
+
+    print("\n1/4  opcode 0d carrying red")
+    answers["0d+red"] = _step(link, journal, "exp:commit:0d-red", [red],
+                              "LEDs? (red / off / nothing / describe)", timeout)
+
+    print("\n2/4  opcode 0d carrying green")
+    answers["0d+green"] = _step(link, journal, "exp:commit:0d-green", [green],
+                                "LEDs? (green / off / nothing / describe)", timeout)
+
+    print("\n3/4  stage blue with 01, then commit black with 0d")
+    answers["stage+commit"] = _step(
+        link, journal, "exp:commit:stage-blue", [stage_blue, commit_black],
+        "LEDs? (blue / off / nothing / describe)", timeout)
+
+    print("\n4/4  opcode 05 carrying white")
+    answers["05+white"] = _step(link, journal, "exp:commit:05-white", [white_05],
+                                "LEDs? (white / off / nothing / describe)", timeout)
+    return answers
+
+
+def verdict_commit(answers: Dict[str, str]) -> str:
+    red = classify(answers.get("0d+red", ""))
+    green = classify(answers.get("0d+green", ""))
+    staged = classify(answers.get("stage+commit", ""))
+
+    carries_colour = "red" in red or "green" in green
+    stages = "blue" in staged
+
+    if carries_colour and not stages:
+        return (
+            "0x0d carries colour in its own packet. That is a direct write:\n"
+            "  opcode 0d + RGB at offsets 4..6 sets the lighting.\n"
+            "Next: find the zone selector, then map zones to physical segments."
+        )
+    if stages:
+        return (
+            "Stage-then-commit confirmed: 0x01 loads colour, 0x0d applies it.\n"
+            "That is the whole write model. Next: find which byte selects the\n"
+            "zone, then map zone values to physical segments."
+        )
+    if "off" in red and "off" in green:
+        return (
+            "0x0d ignores RGB and simply blanks the lighting — an off command.\n"
+            "The colour bytes therefore live behind a different opcode. Next:\n"
+            "census byte 0 to find which opcodes light anything at all."
+        )
+    return (
+        "Mixed or unclear result. The raw answers are in the journal; the\n"
+        "honest read is that no model is established yet. An opcode census\n"
+        "(probe.py experiment opcodes) is the next cheapest step."
+    )
+
+
+def exp_opcodes(link, journal, timeout: int) -> Dict[str, str]:
+    """Which byte-0 values do anything visible?
+
+    Bright red throughout, so any response is unmistakable, and the reply's
+    opcode echo tells us separately whether the command was even accepted.
+    """
+    answers: Dict[str, str] = {}
+    opcodes = safety.iter_safe(range(0x00, 0x11))
+    print(f"Testing {len(opcodes)} opcodes with red. Say what you see, or press")
+    print("Enter for no change.\n")
+    for opcode in opcodes:
+        print(f"opcode {opcode:02x}")
+        payload = protocol.build_probe(r=0xFF, opcode=opcode)
+        answers[f"{opcode:02x}"] = _step(
+            link, journal, f"exp:opcodes:{opcode:02x}", [payload], "LEDs?", timeout)
+    return answers
+
+
+def verdict_opcodes(answers: Dict[str, str]) -> str:
+    live = [op for op, ans in answers.items() if "nothing" not in classify(ans) and ans]
+    live = [op for op in live if classify(answers[op])]
+    if not live:
+        return "No opcode in 0x00-0x10 changed the lighting."
+    lines = ["Opcodes that changed the lighting:"]
+    for op in live:
+        lines.append(f"  {op}  {answers[op]}")
+    return "\n".join(lines)
+
+
+EXPERIMENTS = {
+    "commit": (exp_commit, verdict_commit,
+               "is 0x0d an off command or the commit half of stage/commit?"),
+    "opcodes": (exp_opcodes, verdict_opcodes,
+                "which byte-0 values change the lighting at all?"),
+}
+
+
+def cmd_experiment(args: argparse.Namespace) -> int:
+    if args.name not in EXPERIMENTS:
+        print("Available experiments:")
+        for name, (_, _, blurb) in EXPERIMENTS.items():
+            print(f"  {name:10} {blurb}")
+        return 2
+
+    run, verdict, blurb = EXPERIMENTS[args.name]
+    print(f"experiment: {args.name} — {blurb}")
+    print("Watch the monitor. Ctrl-C is safe; answers are saved as you give them.")
+
+    with Journal() as journal:
+        print(f"session: {journal.path}")
+        with transport.Transport(journal) as link:
+            journal.note(f"experiment: {args.name}")
+            answers = run(link, journal, args.timeout)
+
+    text = verdict(answers)
+    print("\n" + "=" * 60)
+    print(text)
+    print("=" * 60)
+    journal_note = f"verdict({args.name}): {text}"
+    with Journal(session=journal.session) as reopened:
+        reopened.note(journal_note)
+    return 0
+
+
+# --------------------------------------------------------------------------
 # analysis over journals
 # --------------------------------------------------------------------------
 
@@ -410,6 +587,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = add_common(sub.add_parser("release", help="hunt for the OSD handover command"))
     p.set_defaults(func=cmd_release)
+
+    p = add_common(sub.add_parser("experiment", help="run a curated experiment"))
+    p.add_argument("name", nargs="?", default="", help="commit | opcodes")
+    p.set_defaults(func=cmd_experiment)
 
     p = sub.add_parser("diff", help="compare two labelled replies in a session")
     p.add_argument("session")
