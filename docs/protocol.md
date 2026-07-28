@@ -142,6 +142,35 @@ for a colour field to colour.
 The lighting is physically a **diamond** with four segments — top-left,
 top-right, bottom-left, bottom-right.
 
+### The LED buffer is one byte per LED, not RGB triplets
+
+`probe.py experiment stream`, 2026-07-29. A repeating `00 ff 00` pattern written
+from byte 9, byte 10 and byte 11 in turn produced **red at every alignment**.
+A triplet stream would have produced green at one of them.
+
+A uniform `0x40` fill from byte 10 looked *brighter* than the `00 ff 00`
+pattern. Sparse-bright loses to uniform-dim, which is what one byte per LED
+looks like and not what grouped triplets look like.
+
+So bytes 9–63 are **55 single-byte LED values**, and every one of them so far
+has lit red.
+
+### Colour is not selected by anything tested so far
+
+55 red-only LEDs is not a plausible product, so colour must come from somewhere.
+Ruled out to date: offsets 4–6, byte 1, and the alignment of the buffer.
+
+**Methodological warning, recorded because it has now caused two wrong
+conclusions.** "Bytes 1–8 are inert" was measured with the LED buffer empty. A
+colour field with nothing to colour is indistinguishable from a dead byte. Any
+retest of a modifier must light the buffer first — see `_lit()` in
+`tools/probe.py`. The same error explains why offsets 4–6 first looked dead.
+
+Leading hypothesis: **the opcode selects the colour plane.** We have only ever
+used `0x05`, and everything we have ever seen is red. `probe.py experiment hunt`
+tries the neighbouring opcodes with the buffer lit, then falls back to retesting
+the header bytes properly.
+
 ### Reply byte 0 echoes an opcode
 
 | TX byte 0 | RX byte 0 |

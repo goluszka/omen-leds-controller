@@ -299,3 +299,65 @@ class TestVerdictStream:
     def test_it_keeps_the_bisection_finding_rather_than_discarding_it(self):
         text = probe.verdict_stream({"green@9": "red", "green@10": "red", "green@11": "red"})
         assert "still control which LEDs light" in text
+
+
+class TestLitBuffer:
+    def test_it_fills_from_the_first_data_byte_to_the_end(self):
+        out = probe._lit()
+        assert out[probe.DATA_FIRST] == 0xFF
+        assert out[63] == 0xFF
+
+    def test_the_header_keeps_its_baseline_values(self):
+        out = probe._lit()
+        assert out[:4] == bytes([0x05, 0x00, 0x00, 0xD0])
+        assert out[7] == 0x0F and out[8] == 0x06
+
+    def test_the_opcode_is_selectable(self):
+        assert probe._lit(opcode=0x06)[0] == 0x06
+
+    def test_the_fill_value_is_selectable(self):
+        assert probe._lit(value=0x40)[63] == 0x40
+
+
+class TestVerdictHunt:
+    def test_a_plane_opcode_producing_colour_is_reported_as_the_answer(self):
+        text = probe.verdict_hunt(
+            {"reference": "red", "op06": "green", "op07": "blue",
+             "op04": "nothing", "op08": "red"}
+        )
+        assert "selects the colour plane" in text
+        assert "06" in text and "07" in text
+
+    def test_all_red_planes_move_on_to_the_header(self):
+        text = probe.verdict_hunt(
+            {"reference": "red", "op06": "red", "op07": "red",
+             "hdr:byte 3: d0 -> 00": "green"}
+        )
+        assert "Colour changed with" in text
+        assert "byte 3" in text
+
+    def test_nothing_anywhere_is_reported_honestly(self):
+        text = probe.verdict_hunt(
+            {"reference": "red", "op06": "red", "op07": "red",
+             "hdr:byte 3: d0 -> 00": "red", "hdr:byte 7: 0f -> 00": "red"}
+        )
+        assert "colour is not" in text
+        assert "Remaining possibilities" in text
+
+    def test_a_dead_end_still_names_the_working_fallback(self):
+        # Red-only control of 55 LEDs is a shippable tool; the verdict should
+        # say so rather than implying the work has failed.
+        text = probe.verdict_hunt(
+            {"reference": "red", "op06": "red", "hdr:byte 3: d0 -> 00": "red"}
+        )
+        assert "already a working tool" in text
+
+    def test_unlit_opcodes_are_not_mistaken_for_colour(self):
+        text = probe.verdict_hunt(
+            {"reference": "red", "op06": "nothing", "op07": "off"}
+        )
+        assert "selects the colour plane" not in text
+
+    def test_phase_a_only_runs_report_when_phase_b_was_skipped(self):
+        text = probe.verdict_hunt({"reference": "red", "op06": "red"})
+        assert "No neighbouring opcode changed the colour" in text

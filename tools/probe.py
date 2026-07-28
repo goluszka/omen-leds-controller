@@ -950,7 +950,137 @@ def verdict_stream(answers: Dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+DATA_FIRST = 9          # first LED byte, established by bisection
+PLANE_CANDIDATES = (0x06, 0x07, 0x04, 0x08)
+
+
+def _lit(opcode: int = OP_SET, value: int = 0xFF) -> bytes:
+    """A packet that lights the whole diamond, so modifiers have something to
+    modify. Testing a colour field against an empty buffer is what made bytes
+    1..8 look inert twice over."""
+    return _fill(protocol.build_probe(opcode=opcode), DATA_FIRST, 63, value)
+
+
+def exp_hunt(link, journal, timeout: int) -> Dict[str, str]:
+    """Where does colour come from?
+
+    Every observation so far has been red, and we have only ever used opcode
+    0x05. One byte per LED across 55 bytes would mean 55 red-only LEDs, which no
+    RGB product has — so the likelier reading is that the opcode selects a
+    colour plane and 0x05 is simply the red one.
+
+    Phase A tries the neighbouring opcodes, which is the cheap high-prior test.
+    Phase B only runs if that fails, and retests the header bytes with the
+    buffer lit, since the earlier "bytes 1..8 are inert" finding was measured
+    against an empty buffer and cannot distinguish a dead byte from a colour
+    field with nothing to colour.
+    """
+    blank = protocol.build_probe(opcode=OP_BLANK)
+    answers: Dict[str, str] = {}
+
+    print("\nReference: whole diamond lit under opcode 05.")
+    for pkt in (blank, _lit()):
+        link.exchange(pkt, timeout_ms=timeout, label="hunt:reference")
+    answers["reference"] = ask("Describe it — colour and brightness")
+    journal.observation(answers["reference"], label="hunt:reference")
+
+    print("\nPhase A: the same buffer under neighbouring opcodes.")
+    print("If the opcode selects a colour plane, one of these is not red.\n")
+    for opcode in PLANE_CANDIDATES:
+        print(f"opcode {opcode:02x}")
+        answers[f"op{opcode:02x}"] = _step(
+            link, journal, f"hunt:op{opcode:02x}", [blank, _lit(opcode)],
+            "colour? (describe — or 'nothing' if unlit)", timeout)
+
+    if any(set(classify(v)) - {"red", "nothing", "off"}
+           for k, v in answers.items() if k.startswith("op")):
+        return answers
+
+    print("\nPhase B: header bytes, this time with the buffer lit.\n")
+    base = _lit()
+    cleared = _fill(base, 4, 6, 0x00)
+    header_trials = [
+        ("4-6 = 00 ff 00", protocol.with_byte(cleared, 5, 0xFF)),
+        ("4-6 = 00 00 ff", protocol.with_byte(cleared, 6, 0xFF)),
+        ("4-6 = ff ff ff", _fill(base, 4, 6, 0xFF)),
+        ("byte 3: d0 -> 00", protocol.with_byte(base, 3, 0x00)),
+        ("byte 7: 0f -> 00", protocol.with_byte(base, 7, 0x00)),
+        ("byte 8: 06 -> 01", protocol.with_byte(base, 8, 0x01)),
+    ]
+
+    for name, payload in header_trials:
+        print(name)
+        answers[f"hdr:{name}"] = _step(
+            link, journal, f"hunt:hdr:{name}", [blank, payload],
+            "colour? (describe)", timeout)
+    return answers
+
+
+def verdict_hunt(answers: Dict[str, str]) -> str:
+    reference = answers.get("reference", "(not recorded)")
+    lines = [f"reference (opcode 05, buffer lit): {reference}", ""]
+
+    def interesting(value: str) -> bool:
+        return bool(set(classify(value)) - {"red", "nothing", "off"})
+
+    planes = {k: v for k, v in answers.items() if k.startswith("op")}
+    headers = {k: v for k, v in answers.items() if k.startswith("hdr:")}
+
+    lines.append("opcodes tried with the buffer lit:")
+    for key, value in planes.items():
+        lines.append(f"  {key[2:]}  {value}")
+
+    plane_hits = [k[2:] for k, v in planes.items() if interesting(v)]
+    if plane_hits:
+        lines += [
+            "",
+            f"Opcode(s) {', '.join(plane_hits)} produced a colour other than red.",
+            "The opcode selects the colour plane: write the red plane with 0x05,",
+            "then the others, to compose an arbitrary colour per LED.",
+            "",
+            "Next: confirm by prediction — write a specific LED a specific colour",
+            "across the planes and check it lands where predicted.",
+        ]
+        return "\n".join(lines)
+
+    if not headers:
+        lines += ["", "No neighbouring opcode changed the colour."]
+        return "\n".join(lines)
+
+    lines += ["", "header bytes tried with the buffer lit:"]
+    for key, value in headers.items():
+        lines.append(f"  {key[4:]:18} {value}")
+
+    header_hits = [k[4:] for k, v in headers.items() if interesting(v)]
+    if header_hits:
+        lines += [
+            "",
+            f"Colour changed with: {', '.join(header_hits)}.",
+            "That is the colour control, and it was invisible earlier only",
+            "because the buffer was empty. Sweep it next.",
+        ]
+    else:
+        lines += [
+            "",
+            "Neither the neighbouring opcodes nor the header bytes changed the",
+            "colour, with the buffer lit in every trial. So colour is not",
+            "selected anywhere in this packet.",
+            "",
+            "Remaining possibilities, cheapest first: a separate mode-setting",
+            "packet sent before the pixel data; a wider opcode range than the",
+            "four tried here; or the 6-byte feature report, which we have never",
+            "successfully written.",
+            "",
+            "Worth stating plainly: single-colour control of 55 addressable LEDs",
+            "is already a working tool. If colour resists a couple more rounds,",
+            "shipping red-only and revisiting is the better trade.",
+        ]
+    return "\n".join(lines)
+
+
 EXPERIMENTS = {
+    "hunt": (exp_hunt, verdict_hunt,
+             "where does colour come from — plane opcodes or header bytes?"),
     "stream": (exp_stream, verdict_stream,
                "is the packet tail a stream of RGB triplets?"),
     "bisect": (exp_bisect, verdict_bisect,
