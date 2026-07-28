@@ -124,8 +124,6 @@ omenled/
 tools/probe.py   Reverse-engineering workbench: the experiments that decoded
                  the protocol, kept so findings can be reproduced or extended.
 examples/        Runnable reference code.
-legacy/          An earlier attempt's scripts. Read the REFUTED section of
-                 docs/protocol.md before trusting anything in there.
 ```
 
 ```sh

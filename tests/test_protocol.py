@@ -100,41 +100,7 @@ class TestSurvey:
         assert "none" in result.report()
 
 
-class TestTracks:
-    def test_finds_the_offset_carrying_the_expected_value(self):
-        # Device replies where byte 4 happens to equal the value we set.
-        samples = [
-            (0x10, protocol.build([0x01, 0x00, 0x00, 0xD0, 0x10])),
-            (0x20, protocol.build([0x01, 0x00, 0x00, 0xD0, 0x20])),
-            (0x30, protocol.build([0x01, 0x00, 0x00, 0xD0, 0x30])),
-        ]
-        assert protocol.tracks(samples) == [4]
-
-    def test_rejects_an_offset_that_matches_only_sometimes(self):
-        samples = [
-            (0x10, protocol.build([0x10])),
-            (0x20, protocol.build([0x99])),
-        ]
-        assert protocol.tracks(samples) == []
-
-    def test_a_single_sample_is_not_evidence(self):
-        # One sample makes every zero byte look like a match for value 0.
-        samples = [(0x00, protocol.build([0x00]))]
-        assert len(protocol.tracks(samples)) == protocol.REPORT_SIZE
-
-    def test_empty_input_yields_nothing(self):
-        assert protocol.tracks([]) == []
-
-
 class TestHelpers:
-    def test_nonzero_offsets(self):
-        assert protocol.nonzero_offsets(protocol.build([0x00, 0x01, 0x00, 0x02])) == [1, 3]
-
-    def test_is_empty_treats_none_and_all_zero_alike(self):
-        assert protocol.is_empty(None)
-        assert protocol.is_empty(bytes(64))
-        assert not protocol.is_empty(protocol.build([0x01]))
-
     def test_annotate_labels_known_offsets(self):
         text = protocol.annotate(protocol.build_probe(r=0xFF))
         assert "opcode" in text

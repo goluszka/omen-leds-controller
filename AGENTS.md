@@ -134,9 +134,9 @@ pipe; a blind sweep can in principle reach flash or bootloader paths.
 `omenled/safety.py` refuses payloads resembling known unlock magics. Use
 `tools/probe.py experiment …`, which is structured and journalled.
 
-**Do not trust anything in `legacy/`.** It is a previous attempt kept for
-reference. Several of its conclusions are provably wrong and are catalogued in
-the REFUTED section of `docs/protocol.md`.
+**Read the REFUTED section of `docs/protocol.md` before re-testing anything.**
+An earlier attempt reached several provably wrong conclusions; they are
+catalogued there so they are not rediscovered.
 
 ## Verifying your changes
 

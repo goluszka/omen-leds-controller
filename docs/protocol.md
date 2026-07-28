@@ -18,7 +18,6 @@ Last updated: 2026-07-29, after the colour and zones sessions.
 | Product | `OMEN 27k External Light Device` |
 | Manufacturer | `ENE` |
 | VID:PID | `03F0:07B0` |
-| Serial | `(redacted)` |
 | Interface | 1, usage page `0xFF01`, usage `0xA1` |
 
 Report descriptor read live from the `IOHIDInterface` node
@@ -371,9 +370,9 @@ Candidate readings still open: a different channel ordering, inverted channels,
 or an index into a palette rather than a colour at all. `probe.py experiment
 colour` eliminates them by trial.
 
-Note the prior attempt's claim that `05` with `ff 00 00` produced *white* comes
-from `legacy/omen_find_led_offset.py`, which sent 63-byte reports and also
-overwrote one byte per iteration. It is not evidence and is not used here.
+Note the prior attempt's claim that `05` with `ff 00 00` produced *white* came
+from a script that sent 63-byte reports *and* overwrote one byte per iteration.
+It was not evidence and was not used here.
 
 ### Packet layout
 
@@ -435,9 +434,9 @@ the release command remains unknown.
 ### Report IDs `0xE0`, `0x0C`, `0xBB`, `0x3F`, `0xC0`
 
 Not this device. They come from descriptor `0600ff090ba101…85e0…850c…85bb…`,
-which belongs to the **Apple Internal Keyboard / Trackpad** (VendorID 1452,
-visible in `legacy/hid_omen.txt`). Writes aimed at them returned `-1` because
-they addressed the wrong device. This monitor has no report IDs at all.
+which belongs to the **Apple Internal Keyboard / Trackpad** (VendorID 1452).
+Writes aimed at them returned `-1` because they addressed the wrong device.
+This monitor has no report IDs at all.
 
 ### `WRITE: 65` / `WRITE: 64` as status codes
 
@@ -445,9 +444,9 @@ Byte counts echoed by hidapi, not device responses. See framing above.
 
 ### The prior attempt's colour dumps
 
-`legacy/red.txt` and `legacy/blue.txt` are byte-identical, as are
-`legacy/red_dump.txt` and `legacy/blue_dump.txt`. Those reads never observed
-state, so nothing derived from them is evidence.
+Its "red" and "blue" readback dumps were byte-identical to each other. Those
+reads never observed state, so nothing derived from them was evidence. The
+dumps have since been deleted along with the rest of that attempt.
 
 ### `0x01` does nothing visible
 

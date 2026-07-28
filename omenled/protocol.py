@@ -168,24 +168,6 @@ def survey(samples: Iterable[bytes]) -> FieldSurvey:
     return result
 
 
-def tracks(samples: Sequence[Tuple[int, bytes]]) -> List[int]:
-    """Offsets whose byte equals the expected value in every labelled sample.
-
-    The core test of the OSD oracle: set a colour to a known component value,
-    dump the device's reply, and ask which byte position carries that exact
-    value every time. An offset that survives several distinct values is very
-    unlikely to be coincidence.
-    """
-    if not samples:
-        return []
-    length = len(samples[0][1])
-    return [
-        offset
-        for offset in range(length)
-        if all(payload[offset] == expected for expected, payload in samples)
-    ]
-
-
 def annotate(payload: bytes, width: int = 16) -> str:
     """Hex dump with the current hypothesis attached to known offsets."""
     lines = []
@@ -365,11 +347,3 @@ def gradient(start: Tuple[int, int, int], end: Tuple[int, int, int],
         )
         for i in range(count)
     ]
-
-
-def nonzero_offsets(payload: bytes) -> List[int]:
-    return [i for i, b in enumerate(payload) if b]
-
-
-def is_empty(payload: Optional[bytes]) -> bool:
-    return payload is None or not any(payload)

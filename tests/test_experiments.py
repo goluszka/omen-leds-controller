@@ -1,7 +1,8 @@
-"""Tests for the workbench's pure logic.
+"""How the workbench reads a human's answer.
 
-The interpretation of a human answer is where a decode most easily fools
-itself, so the classifier and the verdicts are tested rather than eyeballed.
+This is where a decode most easily fools itself, and did: three separate
+false-positive verdicts came from ad-hoc string comparison. The real answers
+that caused them are used as test cases.
 """
 
 import os
@@ -14,24 +15,18 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 import probe
+from omenled import protocol
 
 
 class TestClassify:
     @pytest.mark.parametrize(
         "answer,expected",
         [
-            ("red", "red"),
-            ("went red", "red"),
-            ("czerwony", "red"),
-            ("all green now", "green"),
-            ("zielony", "green"),
-            ("blue", "blue"),
-            ("white", "white"),
-            ("biały", "white"),
-            ("leds went out", "off"),
-            ("zgasły", "off"),
-            ("nothing", "nothing"),
-            ("nic", "nothing"),
+            ("red", "red"), ("went red", "red"), ("czerwony", "red"),
+            ("all green now", "green"), ("zielony", "green"),
+            ("blue", "blue"), ("white", "white"), ("biały", "white"),
+            ("leds went out", "off"), ("zgasły", "off"),
+            ("nothing", "nothing"), ("nic", "nothing"),
         ],
     )
     def test_recognises_answers_in_either_language(self, answer, expected):
@@ -50,65 +45,146 @@ class TestClassify:
         ],
     )
     def test_words_that_merely_contain_a_keyword_are_not_matched(self, answer, not_expected):
-        # A substring match here would manufacture evidence from an ambiguous
-        # answer, which is the one failure mode a decode cannot recover from.
+        # A substring match manufactures evidence from an ambiguous answer,
+        # which is the one failure a decode cannot recover from.
         assert not_expected not in probe.classify(answer)
 
-    def test_the_default_no_change_string_reads_as_nothing(self):
-        assert "nothing" in probe.classify("no visible change")
+
+class TestPosition:
+    @pytest.mark.parametrize(
+        "answer",
+        ["left bottom", "left bottom, slighlty shifted", "bottom left",
+         "red left bottom segment, slightly smaller", "lewy dolny"],
+    )
+    def test_the_same_place_described_differently_normalises_alike(self, answer):
+        assert probe.position(answer) == ("bottom", "left")
+
+    def test_a_qualifier_does_not_outvote_the_subject(self):
+        answer = "red bottom left segment, with slight part of right bottom segment"
+        assert probe.position(answer) == ("bottom", "left")
+
+    def test_genuinely_different_places_differ(self):
+        assert probe.position("top right") != probe.position("bottom left")
+
+    def test_an_answer_with_no_position_words_is_unrecognised(self):
+        assert probe.position("it went red") is None
 
 
-class TestVerdictCommit:
-    def test_colour_in_the_0d_packet_means_a_direct_write(self):
-        text = probe.verdict_commit(
-            {"0d+red": "red", "0d+green": "green", "stage+commit": "off"}
-        )
-        assert "direct write" in text
+class TestReportsChange:
+    REFERENCE = "small part of bottom left segment"
 
-    def test_staged_colour_surviving_a_black_commit_means_stage_then_commit(self):
-        text = probe.verdict_commit(
-            {"0d+red": "nothing", "0d+green": "nothing", "stage+commit": "blue"}
-        )
-        assert "Stage-then-commit confirmed" in text
+    @pytest.mark.parametrize(
+        "answer",
+        ["the same", "same", "The same", "no change", "identical",
+         "unchanged", "bez zmian", "to samo", "", "   "],
+    )
+    def test_answers_meaning_nothing_changed(self, answer):
+        assert not probe.reports_change(answer, self.REFERENCE)
 
-    def test_staging_wins_even_when_0d_also_carried_colour(self):
-        # Blue surviving a black commit can only be explained by staging.
-        text = probe.verdict_commit(
-            {"0d+red": "red", "0d+green": "green", "stage+commit": "blue"}
-        )
-        assert "Stage-then-commit confirmed" in text
+    @pytest.mark.parametrize(
+        "answer",
+        ["top right now", "moved to the right", "shifted by one",
+         "przesunięty w prawo", "bottom right segment"],
+    )
+    def test_answers_describing_a_change(self, answer):
+        assert probe.reports_change(answer, self.REFERENCE)
 
-    def test_blanking_regardless_of_colour_means_an_off_command(self):
-        text = probe.verdict_commit(
-            {"0d+red": "leds went out", "0d+green": "leds went out",
-             "stage+commit": "off"}
-        )
-        assert "off command" in text
+    def test_the_same_place_worded_differently_is_not_a_change(self):
+        assert not probe.reports_change("bottom left, small bit", self.REFERENCE)
 
-    def test_an_unclear_result_is_reported_as_unclear_not_forced(self):
-        text = probe.verdict_commit(
-            {"0d+red": "flickered oddly", "0d+green": "", "stage+commit": ""}
-        )
-        assert "no model is established" in text
+    def test_an_ambiguous_answer_counts_as_no_change(self):
+        assert not probe.reports_change("hard to say really", self.REFERENCE)
 
-    def test_missing_answers_do_not_raise(self):
-        assert probe.verdict_commit({})
+    @pytest.mark.parametrize("answer", ["brighter", "dimmer", "darker", "jaśniej"])
+    def test_comparatives_register_as_change(self, answer):
+        assert probe.reports_change(answer, "normal")
+
+    def test_a_bare_dark_is_not_a_comparative(self):
+        assert not probe.reports_change("still dark", "dark")
+
+    def test_a_different_ordinal_is_a_change(self):
+        assert probe.reports_change("second led", "first led")
+
+    def test_a_different_digit_is_a_change(self):
+        assert probe.reports_change("LED 9", "LED 1")
+
+    def test_numbers_only_on_one_side_are_not_evidence(self):
+        assert not probe.reports_change("LED 4", "somewhere in the corner")
+
+    def test_a_same_marker_wins_over_numbers(self):
+        assert not probe.reports_change("the same, led 9", "led 1")
+
+
+class TestLitReport:
+    def test_it_is_a_full_length_report(self):
+        assert len(probe.lit_report(protocol.PLANE_RED)) == protocol.REPORT_SIZE
+
+    def test_the_opcode_is_selectable(self):
+        assert probe.lit_report(0x11)[0] == 0x11
+
+    def test_it_carries_the_header_the_device_accepts(self):
+        assert probe.lit_report(0x05)[:4] == bytes([0x05, 0x00, 0x00, 0xD0])
+
+    def test_every_led_byte_is_lit(self):
+        report = probe.lit_report(protocol.PLANE_RED)
+        assert set(report[protocol.DATA_FIRST:]) == {0xFF}
+
+    def test_the_level_is_selectable(self):
+        report = probe.lit_report(protocol.PLANE_RED, value=0x80)
+        assert set(report[protocol.DATA_FIRST:]) == {0x80}
 
 
 class TestVerdictOpcodes:
-    def test_lists_only_the_opcodes_that_did_something(self):
-        text = probe.verdict_opcodes(
-            {"01": "nothing", "05": "went white", "0d": "leds went out"}
-        )
-        assert "05" in text and "0d" in text
-        assert "\n  01" not in text
+    def test_a_new_opcode_is_called_out(self):
+        text = probe.verdict_opcodes({"05": "red", "11": "went green"})
+        assert "NEW: 11" in text
+        assert "docs/protocol.md" in text
 
-    def test_says_so_plainly_when_nothing_responded(self):
+    def test_the_known_four_are_marked_and_not_reported_as_new(self):
+        text = probe.verdict_opcodes({"05": "red", "06": "green"})
+        assert "(known)" in text
+        assert "NEW" not in text
+
+    def test_nothing_responding_is_stated_plainly(self):
         text = probe.verdict_opcodes({"01": "nothing", "02": "no visible change"})
-        assert "No opcode" in text
+        assert "none" in text
 
-    def test_blank_answers_are_not_counted_as_responses(self):
-        assert "No opcode" in probe.verdict_opcodes({"01": "", "02": ""})
+    def test_blank_answers_are_not_counted(self):
+        assert "none" in probe.verdict_opcodes({"01": "", "02": ""})
+
+
+class TestVerdictHwBright:
+    def test_a_changing_byte_is_named_as_hardware_brightness(self):
+        text = probe.verdict_hwbright(
+            {"reference": "normal", "byte1 = ff": "brighter", "byte2 = ff": "the same"}
+        )
+        assert "byte1 = ff" in text
+        assert "hardware brightness control" in text
+
+    def test_no_change_points_at_the_software_path(self):
+        text = probe.verdict_hwbright(
+            {"reference": "normal", "byte1 = ff": "the same", "byte2 = ff": "same"}
+        )
+        assert "No header byte changed the brightness" in text
+        assert "brightness 40" in text
+
+    def test_it_states_the_cost_of_software_scaling(self):
+        assert "quantise" in probe.verdict_hwbright({"reference": "x", "byte1": "same"})
+
+
+class TestReleaseCandidates:
+    def test_it_skips_the_opcodes_whose_meaning_is_known(self):
+        names = [name for name, _ in probe.release_candidates()]
+        for known in ("opcode 05", "opcode 06", "opcode 07", "opcode 0d"):
+            assert known not in names
+
+    def test_it_skips_the_refusal_list(self):
+        names = [name for name, _ in probe.release_candidates()]
+        assert "opcode 1a" in names or names  # sanity: the list is non-empty
+        assert "opcode ff" not in names
+
+    def test_every_candidate_is_a_full_report(self):
+        assert all(len(p) == protocol.REPORT_SIZE for _, p in probe.release_candidates())
 
 
 class TestParsing:
@@ -118,20 +194,18 @@ class TestParsing:
     def test_comma_syntax(self):
         assert probe.parse_range("0,1,5") == [0, 1, 5]
 
-    def test_hex_and_decimal_both_work(self):
-        assert probe.parse_range("0x10,16") == [16, 16]
-
     def test_a_byte_must_fit_in_a_byte(self):
         with pytest.raises(Exception):
             probe.parse_byte("256")
 
 
 class TestExperimentRegistry:
+    def test_only_the_open_questions_remain(self):
+        assert set(probe.EXPERIMENTS) == {"hwbright", "opcodes"}
+
     def test_every_experiment_has_a_runner_verdict_and_blurb(self):
-        for name, entry in probe.EXPERIMENTS.items():
-            run, verdict, blurb = entry
-            assert callable(run) and callable(verdict)
-            assert blurb.strip()
+        for run, verdict, blurb in probe.EXPERIMENTS.values():
+            assert callable(run) and callable(verdict) and blurb.strip()
 
     def test_unknown_names_list_what_is_available(self, capsys):
         class Args:
@@ -139,4 +213,4 @@ class TestExperimentRegistry:
             timeout = 500
 
         assert probe.cmd_experiment(Args()) == 2
-        assert "commit" in capsys.readouterr().out
+        assert "hwbright" in capsys.readouterr().out

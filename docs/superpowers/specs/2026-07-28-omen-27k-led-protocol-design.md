@@ -27,7 +27,6 @@ recorded no durable findings.
 | Product | `OMEN 27k External Light Device` |
 | Manufacturer | `ENE` (the RGB MCU vendor, not HP) |
 | VID / PID | `0x03F0` / `0x07B0` |
-| Serial | `(redacted)` |
 | HID interface | 1 |
 | Usage page / usage | `0xFF01` / `0xA1` (vendor-defined) |
 
@@ -63,9 +62,9 @@ These are recorded because acting on them again would waste effort:
    `write(b"\x00" + 63 bytes)` returns 64 and sends a malformed 63-byte one. The
    prior attempt's LED hits were short reports, so its byte offsets are not
    trustworthy.
-3. **`red.txt` and `blue.txt` are byte-identical**, as are `red_dump.txt` and
-   `blue_dump.txt`. The prior attempt's readback never observed state, so nothing
-   derived from those dumps is evidence.
+3. **Its "red" and "blue" readback dumps are byte-identical.** The prior
+   attempt's readback never observed state, so nothing derived from those dumps
+   is evidence.
 
 ### Observations that remain credible
 
@@ -149,7 +148,6 @@ docs/
   protocol.md    Living spec: CONFIRMED / HYPOTHESIS / REFUTED
   zones.md       Physical zone map
 data/sessions/   *.jsonl
-legacy/          Prior attempt's scripts, retained, not deleted
 ```
 
 ### `journal.py`
