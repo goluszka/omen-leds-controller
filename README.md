@@ -30,8 +30,6 @@ legacy/          Earlier exploratory scripts, kept for reference. See the
                  REFUTED section of docs/protocol.md before trusting any of it.
 ```
 
-## Using the workbench
-
 ## Controlling the lighting
 
 ```sh
@@ -43,9 +41,14 @@ python3 -m omenled.cli chase               # walk one LED, maps index to positio
 python3 -m omenled.cli off
 ```
 
-60 LEDs, full RGB each. Add `--dry-run` to any command to see the exact bytes
-without sending them.
+60 LEDs, full RGB each. Brightness is applied in software; the last frame is
+remembered at full intensity, so `brightness` re-dims the same picture rather
+than compounding.
 
+## Using the workbench
+
+```sh
+python3 tools/probe.py info        # device facts, transmits nothing
 python3 tools/probe.py baseline    # what is readable before provoking anything
 python3 tools/probe.py experiment  # list the curated experiments
 python3 tools/probe.py sessions    # what has been recorded
@@ -54,9 +57,9 @@ python3 tools/probe.py sessions    # what has been recorded
 `info` and `baseline` never transmit. Everything else can put the monitor into
 software-controlled mode, which locks the OSD lighting menu until control is
 handed back — or, until the release command is known, until the USB cable is
-replugged.
+replugged or the monitor reset.
 
-Add `--dry-run` to any transmitting command to see the packet without sending it.
+Add `--dry-run` to any command to see the exact bytes without sending them.
 
 ## Requirements
 
