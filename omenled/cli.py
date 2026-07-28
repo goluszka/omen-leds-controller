@@ -18,7 +18,7 @@ import time
 from typing import List, Optional
 
 from . import protocol
-from .device import Lighting, connect
+from .device import Lighting, RenderRejected, connect
 from .transport import DeviceNotFound, TransportError
 
 
@@ -57,7 +57,8 @@ def cmd_chase(lights: Lighting, args) -> int:
     """Walk one lit LED along the strip — the quickest way to see the mapping
     between LED index and physical position."""
     for index in range(lights.count):
-        lights.fill((0, 0, 0)).set_led(index, args.colour).render(dry_run=args.dry_run)
+        lights.fill((0, 0, 0)).set_led(index, args.colour).render(
+            dry_run=args.dry_run, verify=False)
         print(f"LED {index}", flush=True)
         if not args.dry_run:
             time.sleep(args.delay)
@@ -109,7 +110,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
     try:
         return args.func(lights, args)
-    except (TransportError, ValueError, IndexError) as exc:
+    except (TransportError, RenderRejected, ValueError, IndexError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

@@ -243,6 +243,42 @@ def plane_packet(plane: int, intensities: Sequence[int], chunk: int = 0) -> byte
     return header + data
 
 
+# Reply byte 3 is a status code. Established 2026-07-29: every accepted write
+# answered 0x80, and the only two rejected ones answered 0xf0 — both were blue
+# plane writes sent directly after a red plane write, skipping green.
+STATUS_OK = 0x80
+STATUS_ERROR = 0xF0
+STATUS_OFFSET = 3
+
+
+@dataclass
+class Reply:
+    """A parsed device acknowledgement.
+
+    The device exposes no readable state, so this status byte is the only
+    feedback there is — it is the difference between a write that landed and
+    one the device threw away.
+    """
+
+    opcode: int
+    status: int
+
+    @property
+    def ok(self) -> bool:
+        return self.status == STATUS_OK
+
+    def __str__(self) -> str:
+        name = {STATUS_OK: "ok", STATUS_ERROR: "rejected"}.get(self.status, "unknown")
+        return f"opcode {self.opcode:02x} -> {name} ({self.status:02x})"
+
+
+def parse_reply(payload: Optional[bytes]) -> Optional[Reply]:
+    """None for a timeout or a reply too short to carry a status."""
+    if payload is None or len(payload) <= STATUS_OFFSET:
+        return None
+    return Reply(opcode=payload[0], status=payload[STATUS_OFFSET])
+
+
 def off_packet() -> bytes:
     """Blank every LED."""
     return build([OP_OFF])

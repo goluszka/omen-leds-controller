@@ -239,3 +239,63 @@ class TestCliCommands:
         args = cli.build_parser().parse_args(["--dry-run", "chase", "red"])
         cli.cmd_chase(light, args)
         assert f"LED {protocol.LED_COUNT - 1}" in capsys.readouterr().out
+
+
+class TestParseReply:
+    def test_an_accepted_write_reads_as_ok(self):
+        reply = protocol.parse_reply(bytes([0x05, 0x00, 0x00, 0x80, 0xEC, 0xAC]))
+        assert reply.ok and reply.opcode == 0x05
+
+    def test_the_rejection_status_is_not_ok(self):
+        # Observed on blue-plane writes sent straight after red, skipping green.
+        reply = protocol.parse_reply(bytes([0x07, 0x00, 0x00, 0xF0, 0xEC, 0xFA, 0x01]))
+        assert not reply.ok
+        assert "rejected" in str(reply)
+
+    def test_an_unknown_status_is_not_treated_as_success(self):
+        assert not protocol.parse_reply(bytes([0x05, 0, 0, 0x42])).ok
+
+    def test_a_timeout_parses_to_nothing(self):
+        assert protocol.parse_reply(None) is None
+
+    def test_a_reply_too_short_to_hold_a_status_parses_to_nothing(self):
+        assert protocol.parse_reply(bytes([0x05, 0x00, 0x00])) is None
+
+
+class TestRenderVerification:
+    def test_planes_go_out_in_red_green_blue_order(self, lights):
+        light, hid = lights
+        light.fill((1, 2, 3)).render(verify=False)
+        assert [w[1] for w in hid.written] == [
+            protocol.PLANE_RED, protocol.PLANE_GREEN, protocol.PLANE_BLUE]
+
+    def test_a_rejection_raises_rather_than_displaying_a_partial_frame(self, lights):
+        light, hid = lights
+        hid.replies = [bytes([0x05, 0, 0, protocol.STATUS_ERROR]) + bytes(60)]
+        with pytest.raises(device.RenderRejected, match="red plane was rejected"):
+            light.fill((255, 0, 0)).render()
+
+    def test_the_error_says_how_to_recover(self, lights):
+        light, hid = lights
+        hid.replies = [bytes([0x05, 0, 0, protocol.STATUS_ERROR]) + bytes(60)]
+        with pytest.raises(device.RenderRejected, match="send `off`"):
+            light.fill((255, 0, 0)).render()
+
+    def test_ok_replies_render_all_three_planes(self, lights):
+        light, hid = lights
+        hid.replies = [bytes([0, 0, 0, protocol.STATUS_OK]) + bytes(60)] * 3
+        light.fill((1, 1, 1)).render()
+        assert len(hid.written) == 3
+
+    def test_a_timeout_is_not_treated_as_a_rejection(self, lights):
+        # The device does not always answer; silence must not abort a render.
+        light, hid = lights
+        hid.replies = []
+        light.fill((1, 1, 1)).render()
+        assert len(hid.written) == 3
+
+    def test_verify_false_skips_the_readback(self, lights):
+        light, hid = lights
+        hid.replies = [bytes([0x05, 0, 0, protocol.STATUS_ERROR]) + bytes(60)]
+        light.fill((1, 1, 1)).render(verify=False)  # must not raise
+        assert len(hid.written) == 3

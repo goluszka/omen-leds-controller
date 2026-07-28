@@ -184,6 +184,40 @@ bytes 9..63  55 intensity bytes, one per LED, for the selected plane
 
 Implemented as `omenled.protocol.plane_packet` and `frame_packets`.
 
+### Planes must be written red, green, blue — reply byte 3 is a status
+
+`probe.py experiment confirm`, 2026-07-29.
+
+| Sequence | Reply to the last write | Result |
+|---|---|---|
+| `0d, 05, 06, 07` | `80` | **white** — as predicted |
+| `0d, 05, 07` (green skipped) | **`f0`** | garbled |
+| `05, 07` (green skipped) | **`f0`** | garbled |
+| `0d, 07` alone | `80` | blue |
+
+Reply byte 3 is a status code: **`0x80` accepted, `0xf0` rejected.** The full
+rejected reply is `<opcode> 00 00 f0 ec fa 01`, against `<opcode> 00 00 80 ec ac
+00` when accepted.
+
+The device tracks frame state across the three plane writes. `0x05` opens a
+frame, `0x06` continues it, `0x07` closes it; a plane out of sequence is
+rejected and the LEDs keep a partial frame. `0x0d` resets that state, which is
+why `0d` followed by `07` alone is accepted.
+
+This status byte is the only feedback the device gives — there is no readable
+state — so `omenled.device.Lighting.render` checks it on every plane and raises
+`RenderRejected` rather than leaving a half-written frame on screen.
+
+### CONFIRMED by prediction: planes are independent and compose
+
+Two trials, both predicted before transmitting:
+
+- `0d` then all three planes with LED 0 at full → **one white LED**. Composition
+  works.
+- A full-brightness write to the **red plane only** → everything red *except*
+  LED 0, which stayed **white**, holding the green and blue set by the previous
+  trial. Planes are independent buffers that persist until overwritten.
+
 ### Open: LEDs beyond the first 55
 
 A full 55-byte write leaves some LEDs in the bottom-left segment dark, so the

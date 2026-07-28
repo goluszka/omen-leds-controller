@@ -361,3 +361,31 @@ class TestVerdictHunt:
     def test_phase_a_only_runs_report_when_phase_b_was_skipped(self):
         text = probe.verdict_hunt({"reference": "red", "op06": "red"})
         assert "No neighbouring opcode changed the colour" in text
+
+
+class TestVerdictConfirm:
+    def test_white_from_three_planes_confirms_composition(self):
+        text = probe.verdict_confirm({"white LED": "white, small part of bottom left"})
+        assert "CONFIRMED" in text
+        assert "colour composes" in text
+
+    def test_a_skipped_plane_is_not_counted_against_composition(self):
+        # The persistence trial sends blue straight after red; the device
+        # rejects that with 0xf0, so its result is not evidence.
+        text = probe.verdict_confirm(
+            {"white LED": "white", "plane persistence": "light blue"}
+        )
+        assert "CONFIRMED" in text
+        assert "NOT evidence against this" in text
+
+    def test_no_white_withholds_the_conclusion(self):
+        text = probe.verdict_confirm({"white LED": "still red"})
+        assert "not" in text and "established" in text
+        assert "CLI is ready" not in text
+
+    def test_the_status_byte_is_always_reported(self):
+        assert "0x80 accepted, 0xf0 rejected" in probe.verdict_confirm({})
+
+    def test_every_answer_is_echoed_back(self):
+        text = probe.verdict_confirm({"two-tone": "half red half blue"})
+        assert "half red half blue" in text

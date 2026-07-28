@@ -1136,30 +1136,33 @@ def verdict_confirm(answers: Dict[str, str]) -> str:
         lines.append(f"  {key:18} {answer}")
     lines.append("")
 
-    persistence = answers.get("plane persistence", "").lower()
-    stacks = "magenta" in persistence
-    replaces = "blue" in persistence and not stacks
+    composed = "white" in classify(answers.get("white LED", ""))
 
-    if stacks:
-        lines.append("Plane writes STACK — each plane is independent, so a frame is")
-        lines.append("three packets and colour composes as expected.")
-    elif replaces:
-        lines.append("Plane writes REPLACE the frame — the last plane written wins.")
-        lines.append("That would make per-LED RGB impossible in one frame, and the")
-        lines.append("earlier green and blue results were whole-frame writes, not")
-        lines.append("composition. Colour would be limited to one plane at a time.")
+    if composed:
+        lines += [
+            "Three plane writes in red-green-blue order produced white, so the",
+            "planes are independent buffers and colour composes. The write path",
+            "is CONFIRMED.",
+            "",
+            "The 'plane persistence' trial is NOT evidence against this: it sends",
+            "blue directly after red, skipping green, and the device answers that",
+            "with status 0xf0 — a rejection. Planes must be written in order.",
+        ]
     else:
-        lines.append("Plane persistence unclear from that answer — re-run it alone.")
+        lines += [
+            "Three plane writes did not produce white, so composition is not",
+            "established. Check the journal for status 0xf0 replies before",
+            "concluding anything: a rejected write looks exactly like a wrong",
+            "model from the LEDs alone.",
+        ]
 
     lines.append("")
-    if "white" in classify(answers.get("white LED", "")):
-        lines.append("White from three plane writes: composition confirmed.")
-    if "chunk 1" in answers:
-        lines.append(f"chunk index: {answers['chunk 1']}")
-    lines.append("")
-    lines.append("If the single-LED and two-tone trials matched their predictions,")
-    lines.append("the write path is CONFIRMED and the CLI is ready to use:")
-    lines.append("  python3 -m omenled.cli fill '#00ff00'")
+    lines.append("Reply byte 3 is a status: 0x80 accepted, 0xf0 rejected. That is")
+    lines.append("the only feedback this device gives, and omenled.device now")
+    lines.append("checks it on every render.")
+
+    if composed:
+        lines += ["", "The CLI is ready:", "  python3 -m omenled.cli fill '#00ff00'"]
     return "\n".join(lines)
 
 

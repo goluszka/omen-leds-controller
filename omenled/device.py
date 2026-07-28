@@ -17,6 +17,10 @@ from .transport import Transport
 Pixel = Tuple[int, int, int]
 
 
+class RenderRejected(Exception):
+    """The device refused a plane write, so the LEDs show a partial frame."""
+
+
 class Lighting:
     """Controls the diamond.
 
@@ -53,13 +57,29 @@ class Lighting:
 
     # -- output ------------------------------------------------------------
 
-    def render(self, dry_run: bool = False) -> "Lighting":
-        """Write the framebuffer as three plane reports."""
+    def render(self, dry_run: bool = False, verify: bool = True) -> "Lighting":
+        """Write the framebuffer as three plane reports, in red-green-blue order.
+
+        The order is load-bearing, not stylistic. The device tracks frame state
+        across the three writes and rejects a plane sent out of sequence with
+        status 0xf0, leaving the LEDs showing a partial frame. `verify` reads
+        each acknowledgement back so a rejection is reported rather than
+        silently displayed.
+        """
         names = ("red", "green", "blue")
         for name, packet in zip(names, protocol.frame_packets(self.pixels)):
             if dry_run:
                 print(f"{name:6} plane: {' '.join(f'{b:02x}' for b in packet)}")
             self.transport.write(packet, label=f"render:{name}", dry_run=dry_run)
+            if verify and not dry_run:
+                reply = protocol.parse_reply(
+                    self.transport.read(timeout_ms=150, label=f"render:{name}"))
+                if reply is not None and not reply.ok:
+                    raise RenderRejected(
+                        f"the {name} plane was rejected ({reply}). Planes must be "
+                        "written red, green, blue in order; send `off` to reset "
+                        "the device's frame state and try again."
+                    )
         return self
 
     def off(self, dry_run: bool = False) -> "Lighting":
