@@ -101,15 +101,20 @@ refuted: blue staged with `0x01` did not survive a black `0x0d`.
 This one is safe from the contamination described below — an animation cannot
 explain the lighting going *dark* on command, and it did so every time.
 
-### `0x05` turns the lighting on
+### `0x05` writes red to the bottom-left region, and does not restore OSD state
 
-`05 00 00 d0 ff ff ff 0f 06 00 03` lights the panel after a `0x0d` blank, in
-every trial.
+`05 00 00 d0 ff ff ff 0f 06 00 03` lights the bottom-left region red after a
+`0x0d` blank, in every trial.
 
-**What it lights is not established.** It was previously recorded here as
-"lights one segment", which assumed the bottom-left red region was our packet's
-doing. See the contamination note below: if an effect is running, `0x05` is
-simply *on*, and the region we saw belongs to the monitor, not to us.
+**The OSD had been set to static green before session `20260729-000931`, and
+`0x05` produced red.** So `0x05` is not "lighting on" restoring the monitor's
+own configuration — it writes a colour of its own. Our packets do reach the
+lighting.
+
+What selects that red, and that position, is unknown. Under `0x05` the only
+bytes ever varied are byte 1 and offsets 4–6, all of which are inert. Bytes 2,
+3, 7, 8, 9 and 10 have been held constant at `00 d0 … 0f 06 00 03` throughout,
+and bytes 11–63 have never been anything but zero. The selector is among those.
 
 ### Reply byte 0 echoes an opcode
 

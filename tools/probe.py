@@ -807,12 +807,15 @@ def verdict_bisect(answers: Dict[str, str]) -> str:
         return (
             f"reference: {reference}\n\n"
             "Setting all 63 payload bytes to ff changed nothing.\n\n"
-            "The device ignores the entire packet body under opcode 0x05, which\n"
-            "means 0x05 is simply 'lighting on' and carries no parameters at all.\n"
-            "Colour and zone must therefore be selected by a different opcode.\n\n"
+            "The device ignores the entire packet body under opcode 0x05, so the\n"
+            "output is fixed to the opcode itself. Note this is NOT the same as\n"
+            "0x05 meaning 'lighting on': the OSD was set to static green and 0x05\n"
+            "produced red, so it writes its own colour rather than restoring the\n"
+            "monitor's state.\n\n"
+            "That makes 0x05 a hardcoded write, and colour and zone selection must\n"
+            "live behind a different opcode.\n\n"
             "Next: `experiment opcodes` to find which other byte-0 values do\n"
-            "anything. The pair we have, 05/0d, is an on/off switch and nothing\n"
-            "more."
+            "anything."
         )
     if responsive is None:
         return "Bisection did not complete. The journal holds the answers so far."

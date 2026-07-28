@@ -206,10 +206,13 @@ class TestFill:
 
 
 class TestVerdictBisect:
-    def test_an_ignored_body_is_reported_as_an_on_off_switch(self):
+    def test_an_ignored_body_is_reported_as_a_hardcoded_write(self):
         text = probe.verdict_bisect({"reference": "bottom left red", "responsive": "none"})
         assert "ignores the entire packet body" in text
-        assert "on/off switch" in text
+        # Must not be described as merely 'on': the OSD was green and 0x05
+        # produced red, so it writes rather than restores.
+        assert "hardcoded write" in text
+        assert "NOT the same as" in text
 
     def test_a_responsive_byte_is_named_with_its_hypothesis(self):
         text = probe.verdict_bisect({"reference": "x", "responsive": "7"})
