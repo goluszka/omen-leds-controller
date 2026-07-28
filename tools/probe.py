@@ -832,7 +832,127 @@ def verdict_bisect(answers: Dict[str, str]) -> str:
     )
 
 
+def _repeat(base: bytes, start: int, pattern: tuple) -> bytes:
+    """Fill from `start` to the end of the report with a repeating pattern."""
+    out = bytearray(base)
+    for i in range(start, protocol.REPORT_SIZE):
+        out[i] = pattern[(i - start) % len(pattern)]
+    return bytes(out)
+
+
+# Candidate offsets at which per-LED data could begin. Bisection put the first
+# responsive byte at 11 and showed bytes 1..8 inert, so the boundary is at 9,
+# 10 or 11; a triplet stream starting at 10 would give exactly 18 LEDs in the
+# remaining 54 bytes, which is the tidiest of the three.
+DATA_STARTS = (9, 10, 11)
+
+GREEN = (0x00, 0xFF, 0x00)
+PHASE_B = (("red", (0xFF, 0x00, 0x00)),
+           ("blue", (0x00, 0x00, 0xFF)),
+           ("white", (0xFF, 0xFF, 0xFF)))
+
+
+def exp_stream(link, journal, timeout: int) -> Dict[str, str]:
+    """Is the tail of the packet a stream of RGB triplets?
+
+    Bisection showed the lit area grows with the number of bytes set, which is
+    the signature of a pixel buffer rather than a field. If those bytes are RGB
+    triplets, a repeating green pattern must produce green — and everything we
+    have seen so far has been red, so green is unmistakable.
+
+    Phase A tries the three plausible alignments; phase B only runs if one of
+    them yields green, because without colour control the alignment does not
+    matter yet.
+    """
+    base = protocol.build_probe(opcode=OP_SET)
+    blank = protocol.build_probe(opcode=OP_BLANK)
+    answers: Dict[str, str] = {}
+
+    print("\nPhase A: repeating 00 ff 00 from three candidate start offsets.")
+    print("If the tail is RGB triplets, one of these must come out GREEN.\n")
+    for start in DATA_STARTS:
+        print(f"data starting at byte {start}")
+        answers[f"green@{start}"] = _step(
+            link, journal, f"stream:green@{start}",
+            [blank, _repeat(base, start, GREEN)],
+            "colour? (green / red / other — describe)", timeout)
+
+    winner = next(
+        (s for s in DATA_STARTS if "green" in classify(answers[f"green@{s}"])), None)
+
+    if winner is None:
+        print("\nNo alignment produced green. Testing whether the bytes are")
+        print("intensity-only, with colour fixed elsewhere.\n")
+        answers["dim"] = _step(
+            link, journal, "stream:dim", [blank, _repeat(base, 10, (0x40,))],
+            "same colour as before but dimmer, or something else?", timeout)
+        return answers
+
+    answers["start"] = str(winner)
+    print(f"\nGreen at start {winner}. Phase B: confirming the other channels.\n")
+    for name, pattern in PHASE_B:
+        print(f"repeating {' '.join(f'{v:02x}' for v in pattern)} — expecting {name}")
+        answers[name] = _step(
+            link, journal, f"stream:{name}",
+            [blank, _repeat(base, winner, pattern)],
+            f"colour? (expecting {name} — describe what you see)", timeout)
+    return answers
+
+
+def verdict_stream(answers: Dict[str, str]) -> str:
+    start = answers.get("start")
+    if start is None:
+        dim = answers.get("dim", "")
+        lines = ["No alignment produced green, so the tail is not RGB triplets.", ""]
+        for s in DATA_STARTS:
+            lines.append(f"  start {s}: {answers.get(f'green@{s}', '(no answer)')}")
+        lines.append("")
+        if dim:
+            lines.append(f"  intensity test: {dim}")
+        lines += [
+            "",
+            "The bytes still control which LEDs light — bisection established",
+            "that. So they are most likely per-LED intensity with the colour",
+            "fixed by something else, or a packed format wider than one byte per",
+            "channel. Colour control is not solved and may need a different",
+            "opcode entirely.",
+        ]
+        return "\n".join(lines)
+
+    hits = [name for name, _ in PHASE_B if name in classify(answers.get(name, ""))]
+    leds = (protocol.REPORT_SIZE - int(start)) // 3
+
+    lines = [
+        f"The tail is a stream of RGB triplets starting at byte {start}.",
+        f"That leaves {protocol.REPORT_SIZE - int(start)} bytes = {leds} LEDs "
+        f"per report.",
+        "",
+        f"  green confirmed at start {start}",
+    ]
+    for name, _ in PHASE_B:
+        mark = "confirmed" if name in hits else f"NOT seen — got: {answers.get(name, '')}"
+        lines.append(f"  {name}: {mark}")
+    lines.append("")
+
+    if len(hits) == len(PHASE_B):
+        lines += [
+            "All channels behave. This is the write path:",
+            f"  05 <8 header bytes> then {leds} RGB triplets from byte {start}.",
+            "",
+            "Next: confirm by prediction — light one LED a specific colour and",
+            "check it lands where predicted, then map LED index to position.",
+        ]
+    else:
+        lines += [
+            "Green works but not every channel did, so the ordering may not be",
+            "R,G,B. Vary one channel at a time from here rather than assuming.",
+        ]
+    return "\n".join(lines)
+
+
 EXPERIMENTS = {
+    "stream": (exp_stream, verdict_stream,
+               "is the packet tail a stream of RGB triplets?"),
     "bisect": (exp_bisect, verdict_bisect,
                "which byte of the 64 does opcode 05 actually read?"),
     "animation": (exp_animation, verdict_animation,

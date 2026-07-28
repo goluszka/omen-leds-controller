@@ -241,3 +241,61 @@ class TestDiffersDetection:
     @pytest.mark.parametrize("answer", ["same", "identical", "no change"])
     def test_sameness_is_not_read_as_change(self, answer):
         assert not re.search(r"\b(diff\w*|inn\w*|zmien\w*)\b", answer.lower())
+
+
+class TestRepeat:
+    def test_pattern_repeats_from_the_start_offset(self):
+        out = probe._repeat(bytes(64), 10, (0x00, 0xFF, 0x00))
+        assert out[10:16] == b"\x00\xff\x00\x00\xff\x00"
+
+    def test_bytes_before_the_start_are_untouched(self):
+        base = probe.protocol.build_probe(opcode=0x05)
+        out = probe._repeat(base, 10, (0xFF,))
+        assert out[:10] == base[:10]
+
+    def test_it_fills_to_the_end_of_the_report(self):
+        out = probe._repeat(bytes(64), 10, (0xFF,))
+        assert out[63] == 0xFF
+        assert len(out) == 64
+
+    def test_a_single_byte_pattern_is_a_solid_fill(self):
+        assert set(probe._repeat(bytes(64), 60, (0x40,))[60:]) == {0x40}
+
+
+class TestVerdictStream:
+    def _all_good(self, start="10"):
+        return {"start": start, "green@10": "green", "red": "red",
+                "blue": "blue", "white": "white"}
+
+    def test_a_full_pass_reports_the_write_path(self):
+        text = probe.verdict_stream(self._all_good())
+        assert "stream of RGB triplets starting at byte 10" in text
+        assert "18 LEDs" in text
+        assert "This is the write path" in text
+
+    def test_led_count_follows_the_start_offset(self):
+        assert "18 LEDs" in probe.verdict_stream(self._all_good("10"))
+        assert "17 LEDs" in probe.verdict_stream(self._all_good("13"))
+
+    def test_a_partial_pass_does_not_claim_rgb_ordering(self):
+        answers = self._all_good()
+        answers["blue"] = "still red"
+        text = probe.verdict_stream(answers)
+        assert "the ordering may not be" in text and "R,G,B" in text
+        assert "This is the write path" not in text
+
+    def test_no_green_reports_the_triplet_model_refuted(self):
+        text = probe.verdict_stream(
+            {"green@9": "red", "green@10": "red", "green@11": "red", "dim": "dimmer red"}
+        )
+        assert "not RGB triplets" in text
+        assert "per-LED intensity" in text
+
+    def test_no_green_still_lists_every_alignment_tried(self):
+        text = probe.verdict_stream({"green@9": "red", "green@10": "red", "green@11": "red"})
+        for start in probe.DATA_STARTS:
+            assert f"start {start}" in text
+
+    def test_it_keeps_the_bisection_finding_rather_than_discarding_it(self):
+        text = probe.verdict_stream({"green@9": "red", "green@10": "red", "green@11": "red"})
+        assert "still control which LEDs light" in text

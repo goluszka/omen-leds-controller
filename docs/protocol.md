@@ -116,6 +116,32 @@ bytes ever varied are byte 1 and offsets 4–6, all of which are inert. Bytes 2,
 3, 7, 8, 9 and 10 have been held constant at `00 d0 … 0f 06 00 03` throughout,
 and bytes 11–63 have never been anything but zero. The selector is among those.
 
+### The packet tail is a pixel buffer, not a set of fields
+
+`probe.py experiment bisect`, 2026-07-29. Filling byte ranges with `0xff` under
+opcode `0x05`:
+
+| Bytes set to `ff` | Lit area |
+|---|---|
+| 1–63 | whole diamond |
+| 1–32 | whole diamond except the top-left segment |
+| 1–16 | both bottom segments, top off |
+| **1–8** | **identical to the reference** |
+| 9–12 | bottom centre |
+| 11 | bottom-left, bottom-centre dimmer, part of bottom-right |
+
+The lit area grows with the *number* of bytes set, which is the signature of a
+per-LED buffer rather than a parameter field. Bytes 1–8 are inert, so the report
+is a **9-byte header followed by LED data from byte 9 to byte 63**.
+
+This also explains the earlier dead results rather than contradicting them:
+offsets 4–6 and byte 1 are inside the header and genuinely do nothing, and the
+buffer behind them was empty in every one of those trials, so there was nothing
+for a colour field to colour.
+
+The lighting is physically a **diamond** with four segments — top-left,
+top-right, bottom-left, bottom-right.
+
 ### Reply byte 0 echoes an opcode
 
 | TX byte 0 | RX byte 0 |
