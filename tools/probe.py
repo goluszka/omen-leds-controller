@@ -1166,7 +1166,106 @@ def verdict_confirm(answers: Dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def _frame(colour=(0xFF, 0xFF, 0xFF), chunk: int = 0,
+           byte7: Optional[int] = None, byte8: Optional[int] = None) -> List[bytes]:
+    """A full-brightness frame with optional header overrides."""
+    packets = protocol.frame_packets([colour] * protocol.LED_COUNT, chunk=chunk)
+    out = []
+    for packet in packets:
+        if byte7 is not None:
+            packet = protocol.with_byte(packet, 7, byte7)
+        if byte8 is not None:
+            packet = protocol.with_byte(packet, 8, byte8)
+        out.append(packet)
+    return out
+
+
+def exp_tail(link, journal, timeout: int) -> Dict[str, str]:
+    """Why does part of the bottom-left segment never respond?
+
+    Byte 7 has always been 0x0f and byte 8 always 0x06. If byte 8 is a segment
+    count and byte 7 a bitmask of segments to write, then 0x0f selects only four
+    of six and two segments have never been addressed — which is what an area
+    that ignores both writes and blanking looks like.
+
+    The `off` trial runs first because it is the cleanest discriminator: an area
+    still lit after a blank is outside our control entirely, and no amount of
+    pixel data will reach it.
+    """
+    blank = protocol.build_probe(opcode=OP_BLANK)
+    answers: Dict[str, str] = {}
+
+    def trial(key: str, prediction: str, packets: List[bytes], question: str) -> None:
+        print(f"\n{key}\n  expecting: {prediction}")
+        answers[key] = _step(link, journal, f"tail:{key}", packets, question, timeout)
+
+    trial("off", "the whole diamond dark", [blank],
+          "is ANY part still lit? (no / describe what stays lit)")
+
+    trial("baseline white", "all but the problem area white",
+          [blank] + _frame(), "which parts are lit, which are not?")
+
+    trial("byte7 = 3f", "if byte 7 is a segment mask, the missing area now lights",
+          [blank] + _frame(byte7=0x3F), "is the whole diamond white now?")
+
+    trial("byte7 = ff", "same idea, all bits set",
+          [blank] + _frame(byte7=0xFF), "is the whole diamond white now?")
+
+    trial("byte8 = 3f", "if byte 8 is a count rather than byte 7 a mask",
+          [blank] + _frame(byte8=0x3F), "any change to the missing area?")
+
+    trial("chunk 1", "if byte 1 selects a further block of LEDs",
+          [blank] + _frame(chunk=1), "what is lit?")
+    return answers
+
+
+def verdict_tail(answers: Dict[str, str]) -> str:
+    lines = ["trials:", ""]
+    for key, answer in answers.items():
+        lines.append(f"  {key:16} {answer}")
+    lines.append("")
+
+    def whole(key: str) -> bool:
+        value = answers.get(key, "").lower()
+        return "whole" in value or bool(re.search(r"\b(yes|tak|all)\b", value))
+
+    survives_off = not re.search(
+        r"\b(no|none|nie|dark|off|nothing)\b", answers.get("off", "").lower())
+
+    winners = [k for k in ("byte7 = 3f", "byte7 = ff", "byte8 = 3f", "chunk 1")
+               if whole(k)]
+
+    if winners:
+        lines += [
+            f"Fixed by: {', '.join(winners)}.",
+            "",
+            "That header byte selects which segments a write reaches. Set it in",
+            "omenled/protocol.py HEADER_TAIL and the whole diamond becomes",
+            "addressable.",
+        ]
+    elif survives_off:
+        lines += [
+            "Part of the lighting survives a blank and ignores every header",
+            "variant tried. That area is not addressed by this report at all.",
+            "",
+            "It is most likely a separate strip behind its own opcode or report",
+            "shape. Worth one more session; it does not affect control of the",
+            "LEDs we can already reach.",
+        ]
+    else:
+        lines += [
+            "Blanking does clear everything, so the area is reachable — but none",
+            "of the header variants tried made a full write cover it.",
+            "",
+            "Next cheapest: sweep byte 7 across all 256 values with the buffer",
+            "lit, since a mask should show a clear on/off boundary.",
+        ]
+    return "\n".join(lines)
+
+
 EXPERIMENTS = {
+    "tail": (exp_tail, verdict_tail,
+             "why does part of the bottom-left segment never respond?"),
     "confirm": (exp_confirm, verdict_confirm,
                 "predict-then-verify the decoded plane write path"),
     "hunt": (exp_hunt, verdict_hunt,

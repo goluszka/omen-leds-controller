@@ -389,3 +389,50 @@ class TestVerdictConfirm:
     def test_every_answer_is_echoed_back(self):
         text = probe.verdict_confirm({"two-tone": "half red half blue"})
         assert "half red half blue" in text
+
+
+class TestFrameHeaderOverrides:
+    def test_a_frame_is_three_packets(self):
+        assert len(probe._frame()) == 3
+
+    def test_byte7_override_lands_on_every_plane(self):
+        assert all(pkt[7] == 0x3F for pkt in probe._frame(byte7=0x3F))
+
+    def test_byte8_override_lands_on_every_plane(self):
+        assert all(pkt[8] == 0x3F for pkt in probe._frame(byte8=0x3F))
+
+    def test_without_overrides_the_header_is_untouched(self):
+        pkt = probe._frame()[0]
+        assert pkt[7] == 0x0F and pkt[8] == 0x06
+
+    def test_the_chunk_index_reaches_byte_1(self):
+        assert all(pkt[1] == 1 for pkt in probe._frame(chunk=1))
+
+    def test_white_fills_every_plane(self):
+        red, green, blue = probe._frame()
+        for pkt in (red, green, blue):
+            assert set(pkt[probe.protocol.DATA_FIRST:]) == {0xFF}
+
+
+class TestVerdictTail:
+    def test_a_header_byte_that_fixes_it_is_named(self):
+        text = probe.verdict_tail({"off": "no", "byte7 = 3f": "yes, whole diamond white"})
+        assert "Fixed by: byte7 = 3f" in text
+        assert "HEADER_TAIL" in text
+
+    def test_area_surviving_a_blank_is_called_unreachable(self):
+        text = probe.verdict_tail(
+            {"off": "bottom left stays white", "byte7 = 3f": "no change"}
+        )
+        assert "not addressed by this report" in text
+
+    def test_a_clean_blank_with_no_fix_suggests_the_next_sweep(self):
+        text = probe.verdict_tail({"off": "no, all dark", "byte7 = 3f": "no change"})
+        assert "sweep byte 7" in text
+
+    def test_polish_negative_is_understood_as_a_clean_blank(self):
+        text = probe.verdict_tail({"off": "nie", "byte7 = 3f": "no change"})
+        assert "sweep byte 7" in text
+
+    def test_every_trial_is_echoed(self):
+        assert "peculiar" in probe.verdict_tail({"off": "peculiar"})

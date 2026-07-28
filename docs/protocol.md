@@ -218,6 +218,20 @@ Two trials, both predicted before transmitting:
   LED 0, which stayed **white**, holding the green and blue set by the previous
   trial. Planes are independent buffers that persist until overwritten.
 
+### Open: part of the bottom-left segment never responds
+
+`omenled.cli fill '#00ff00'` and `gradient red blue` both light the diamond
+correctly *except* a patch of the bottom-left segment, where part stays dark and
+part stays stuck white. Reproducible across commands and unaffected by `off`.
+
+Leading hypothesis: **byte 7 is a segment write-mask and byte 8 a segment
+count.** They have been held at `0x0f` and `0x06` on every write we have ever
+made. `0x0f` is four bits set against a count of six, which would mean two
+segments have never been addressed — and an unaddressed segment behaves exactly
+like this, ignoring both writes and blanking.
+
+`probe.py experiment tail` tests that, and falls back to the chunk index.
+
 ### Open: LEDs beyond the first 55
 
 A full 55-byte write leaves some LEDs in the bottom-left segment dark, so the
