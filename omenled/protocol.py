@@ -215,14 +215,17 @@ OP_OFF = 0x0D
 
 PLANES = (PLANE_RED, PLANE_GREEN, PLANE_BLUE)
 
-DATA_FIRST = 9
-LED_COUNT = REPORT_SIZE - DATA_FIRST  # 55 per report
+# Byte 8 is LED 0, not a header byte: with every other data byte zeroed, setting
+# byte 8 alone lit a single region at the start of the strip. It had been pinned
+# at 0x06 — about 2% brightness — on every earlier write, which is why it read
+# as a dead LED for several sessions.
+DATA_FIRST = 8
+LED_COUNT = REPORT_SIZE - DATA_FIRST  # 56 per report
 
-# Header bytes 1..8, held at these values throughout every successful write.
-# Byte 1 is a candidate chunk index for LEDs beyond the first 55; the rest have
-# no established meaning, and are preserved rather than zeroed because they are
-# what the device has always been sent.
-HEADER_TAIL = (0x00, 0x00, 0xD0, 0x00, 0x00, 0x00, 0x0F, 0x06)
+# Header bytes 1..7, held at these values throughout every successful write.
+# None has an established meaning; they are preserved rather than zeroed because
+# they are what the device has always been sent and has always accepted.
+HEADER_TAIL = (0x00, 0x00, 0xD0, 0x00, 0x00, 0x00, 0x0F)
 
 
 def plane_packet(plane: int, intensities: Sequence[int], chunk: int = 0) -> bytes:

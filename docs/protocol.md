@@ -237,24 +237,46 @@ everything, no part of the panel is unaddressable in principle.
 
 What remains is **exactly one LED**, mid bottom-left, that never lights.
 
-### Open: is the data start byte 8, making the strip 56 LEDs?
+### CONFIRMED: the LED data starts at byte 8 — 56 LEDs per report
 
-Byte 8 has been `0x06` on every write ever made. If it is LED 0 rather than a
-header byte, it has been sitting at 6/255 — roughly 2% — which beside
-full-brightness neighbours reads as unlit. That would make the strip **56 LEDs**
-beginning mid bottom-left, which is precisely where the dark LED is.
+`probe.py experiment led0`, 2026-07-29. With every other data byte zeroed,
+setting **byte 8 alone lit a single region at the start of the strip**.
 
-`probe.py experiment led0` tests it, and predicts that setting byte 8 alone
-lights precisely that LED and nothing else. If it fails, a dead LED in the panel
-becomes the likeliest explanation, which no protocol change fixes.
+Byte 8 is LED 0, not a header byte. It had been pinned at `0x06` — about 2%
+brightness — on every write made across several sessions, which beside
+full-brightness neighbours read as a dead LED and sent two experiments chasing
+segment masks that do not exist.
 
-### Open: LEDs beyond the first 55
+Corrected layout:
 
-A full 55-byte write leaves some LEDs in the bottom-left segment dark, so the
-strip is longer than one report can address. Byte 1 is the candidate chunk
-index. It appeared inert when tested earlier, but that was against an empty
-buffer — the same measurement error described below. `experiment confirm` tests
-it lit.
+```
+byte  0      opcode: 05 red plane, 06 green, 07 blue, 0d blank all
+bytes 1..7   00 00 d0 00 00 00 0f     header
+bytes 8..63  56 intensity bytes, one per LED, for the selected plane
+```
+
+`DATA_FIRST = 8`, `LED_COUNT = 56` in `omenled/protocol.py`.
+
+**Caveat on one trial.** The second `led0` trial asked "is that one LED dark
+again? (yes/no)" rather than asking for a description, so its answer cannot
+distinguish "the same gap" from "one additional gap". A question that
+presupposes its answer collects no evidence. The conclusion rests on trial
+three, which was unambiguous.
+
+### Open: one LED past the end of the report
+
+With `DATA_FIRST = 8` the report reaches 56 LEDs, and one LED remains dark — sat
+immediately beside LED 0, mid bottom-left. That is where the *last* LED of a
+strip lands when the strip starts mid-segment and wraps.
+
+Excluded as the mechanism for reaching it: byte 1 (ignored — writing chunk 1
+produced an identical result), byte 7 (no effect at `3f` or `ff`), and the
+`chunk` parameter generally. Bytes 2 and 3 are the only header bytes never
+varied against a lit buffer; `probe.py experiment offset` tests them, using a
+single lit LED so an offset shows as movement rather than as one gap closing.
+
+If neither moves it, the alternative is a hardware fault, which the monitor's
+own OSD effects would settle.
 
 ### Reply byte 0 echoes an opcode
 

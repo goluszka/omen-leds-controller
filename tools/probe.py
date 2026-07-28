@@ -952,7 +952,7 @@ def verdict_stream(answers: Dict[str, str]) -> str:
     return "\n".join(lines)
 
 
-DATA_FIRST = 9          # first LED byte, established by bisection
+DATA_FIRST = protocol.DATA_FIRST   # one source of truth
 PLANE_CANDIDATES = (0x06, 0x07, 0x04, 0x08)
 
 
@@ -1364,7 +1364,88 @@ def verdict_led0(answers: Dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def exp_offset(link, journal, timeout: int) -> Dict[str, str]:
+    """Can we reach the one LED past the end of the report?
+
+    With 56 LEDs per report and the strip starting mid bottom-left, the dark LED
+    sits immediately beside LED 0 — which is where the *last* LED of a strip
+    lands when it wraps. Reaching it needs a second report, and bytes 2 and 3
+    are the only header bytes never varied against a lit buffer.
+
+    A single lit LED is the probe rather than a full frame: an offset shows up
+    as the lit spot *moving*, which is far easier to see than one gap closing.
+    """
+    blank = protocol.build_probe(opcode=OP_BLANK)
+    answers: Dict[str, str] = {}
+
+    def one_led(byte2: int = 0x00, byte3: int = 0xD0) -> List[bytes]:
+        out = []
+        for plane in protocol.PLANES:
+            packet = protocol.plane_packet(plane, [0xFF])
+            packet = protocol.with_byte(packet, 2, byte2)
+            out.append(protocol.with_byte(packet, 3, byte3))
+        return out
+
+    def trial(key: str, prediction: str, packets: List[bytes]) -> None:
+        print(f"\n{key}\n  expecting: {prediction}")
+        answers[key] = _step(link, journal, f"offset:{key}", packets,
+                             "where exactly is the lit LED?", timeout)
+
+    trial("reference", "one white LED at the start of the strip",
+          [blank] + one_led())
+    trial("byte2 = 01", "if byte 2 is an offset, the lit LED moves by one",
+          [blank] + one_led(byte2=0x01))
+    trial("byte2 = 08", "a larger offset moves it further",
+          [blank] + one_led(byte2=0x08))
+    trial("byte3 = 00", "byte 3 changed from d0",
+          [blank] + one_led(byte3=0x00))
+    trial("byte3 = d1", "byte 3 incremented",
+          [blank] + one_led(byte3=0xD1))
+    return answers
+
+
+def verdict_offset(answers: Dict[str, str]) -> str:
+    lines = ["trials:", ""]
+    for key, answer in answers.items():
+        lines.append(f"  {key:12} {answer}")
+    lines.append("")
+
+    reference = answers.get("reference", "").strip().lower()
+    moved = [
+        key for key, answer in answers.items()
+        if key != "reference" and answer.strip().lower() != reference
+        and answer.strip() and "no visible change" not in answer.lower()
+    ]
+
+    if moved:
+        lines += [
+            f"The lit LED moved with: {', '.join(moved)}.",
+            "",
+            "That byte offsets the write into the strip, which is how the LEDs",
+            "past byte 63 are reached. Sweep it to find the total LED count,",
+            "then teach omenled.device to send as many reports as the strip",
+            "needs.",
+        ]
+    else:
+        lines += [
+            "Nothing moved the lit LED. Bytes 2 and 3 do not offset the write,",
+            "and with byte 1 and the chunk index already excluded, this report",
+            "shape reaches 56 LEDs and no more.",
+            "",
+            "The remaining LED is likely addressed by a report we have not found",
+            "— or the strip really is 56 and that dark spot is a hardware fault.",
+            "The OSD's own effects settle which: if it stays dark under HP's",
+            "firmware too, nothing we send will fix it.",
+            "",
+            "Either way, 56 of 57 LEDs under full RGB control is the tool you",
+            "asked for, and it works today.",
+        ]
+    return "\n".join(lines)
+
+
 EXPERIMENTS = {
+    "offset": (exp_offset, verdict_offset,
+               "can we reach the LED past the end of the report?"),
     "led0": (exp_led0, verdict_led0,
              "does the LED data start at byte 8, making the strip 56 LEDs?"),
     "tail": (exp_tail, verdict_tail,

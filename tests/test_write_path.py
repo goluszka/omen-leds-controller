@@ -24,7 +24,7 @@ class TestPlanePacket:
 
     def test_carries_the_header_the_device_accepted(self):
         packet = protocol.plane_packet(protocol.PLANE_RED, [])
-        assert packet[:9] == bytes([0x05, 0x00, 0x00, 0xD0, 0x00, 0x00, 0x00, 0x0F, 0x06])
+        assert packet[:8] == bytes([0x05, 0x00, 0x00, 0xD0, 0x00, 0x00, 0x00, 0x0F])
 
     def test_intensities_begin_at_the_first_data_byte(self):
         packet = protocol.plane_packet(protocol.PLANE_GREEN, [0x11, 0x22])
@@ -55,7 +55,7 @@ class TestPlanePacket:
             protocol.plane_packet(protocol.PLANE_RED, [256])
 
     def test_the_led_count_matches_the_report_geometry(self):
-        assert protocol.LED_COUNT == 64 - protocol.DATA_FIRST == 55
+        assert protocol.LED_COUNT == 64 - protocol.DATA_FIRST == 56
 
 
 class TestFramePackets:
@@ -70,13 +70,13 @@ class TestFramePackets:
         assert blue[protocol.DATA_FIRST] == 0x33
 
     def test_a_pure_colour_leaves_the_other_planes_dark(self):
-        red, green, blue = protocol.frame_packets([(0xFF, 0, 0)] * 55)
+        red, green, blue = protocol.frame_packets([(0xFF, 0, 0)] * protocol.LED_COUNT)
         assert set(green[protocol.DATA_FIRST:]) == {0}
         assert set(blue[protocol.DATA_FIRST:]) == {0}
 
     def test_too_many_pixels_are_refused(self):
         with pytest.raises(ValueError):
-            protocol.frame_packets([(0, 0, 0)] * 56)
+            protocol.frame_packets([(0, 0, 0)] * (protocol.LED_COUNT + 1))
 
 
 class TestOffPacket:
@@ -120,7 +120,7 @@ class TestGradient:
         assert ramp[-1] == (255, 0, 0)
 
     def test_length_matches_the_request(self):
-        assert len(protocol.gradient((0, 0, 0), (1, 1, 1), 55)) == 55
+        assert len(protocol.gradient((0, 0, 0), (1, 1, 1), 56)) == 56
 
     def test_a_single_step_is_the_start_colour(self):
         assert protocol.gradient((9, 9, 9), (1, 1, 1), 1) == [(9, 9, 9)]

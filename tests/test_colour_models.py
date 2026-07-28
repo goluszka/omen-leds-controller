@@ -310,7 +310,9 @@ class TestLitBuffer:
     def test_the_header_keeps_its_baseline_values(self):
         out = probe._lit()
         assert out[:4] == bytes([0x05, 0x00, 0x00, 0xD0])
-        assert out[7] == 0x0F and out[8] == 0x06
+        # Byte 7 ends the header; byte 8 is LED 0 and carries pixel data.
+        assert out[7] == 0x0F
+        assert out[8] == 0xFF
 
     def test_the_opcode_is_selectable(self):
         assert probe._lit(opcode=0x06)[0] == 0x06
@@ -403,7 +405,8 @@ class TestFrameHeaderOverrides:
 
     def test_without_overrides_the_header_is_untouched(self):
         pkt = probe._frame()[0]
-        assert pkt[7] == 0x0F and pkt[8] == 0x06
+        assert pkt[:4] == bytes([0x05, 0x00, 0x00, 0xD0])
+        assert pkt[7] == 0x0F
 
     def test_the_chunk_index_reaches_byte_1(self):
         assert all(pkt[1] == 1 for pkt in probe._frame(chunk=1))
@@ -499,3 +502,34 @@ class TestVerdictLed0:
 
     def test_every_answer_is_echoed(self):
         assert "peculiar" in probe.verdict_led0({"byte8 alone": "peculiar"})
+
+
+class TestVerdictOffset:
+    def test_a_moving_led_identifies_the_offset_byte(self):
+        text = probe.verdict_offset(
+            {"reference": "first led", "byte2 = 01": "second led",
+             "byte2 = 08": "ninth led"}
+        )
+        assert "byte2 = 01" in text and "byte2 = 08" in text
+        assert "offsets the write" in text
+
+    def test_identical_answers_are_not_movement(self):
+        text = probe.verdict_offset(
+            {"reference": "first led", "byte2 = 01": "first led",
+             "byte3 = 00": "First LED "}
+        )
+        assert "Nothing moved" in text
+
+    def test_no_visible_change_is_not_movement(self):
+        text = probe.verdict_offset(
+            {"reference": "first led", "byte2 = 01": "no visible change"}
+        )
+        assert "Nothing moved" in text
+
+    def test_a_dead_end_names_the_hardware_check_and_the_working_result(self):
+        text = probe.verdict_offset({"reference": "first led", "byte2 = 01": "first led"})
+        assert "hardware fault" in text
+        assert "56 of 57" in text
+
+    def test_every_trial_is_echoed(self):
+        assert "somewhere odd" in probe.verdict_offset({"reference": "somewhere odd"})
