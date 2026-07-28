@@ -330,6 +330,62 @@ COLOUR_WORDS = {
 }
 
 
+# Phrases meaning "nothing changed". Kept in one place because comparing answer
+# strings ad hoc has produced three separate false-positive verdicts: matching
+# "red" inside "flickered", "whole" inside "whole diamond except…", and treating
+# the literal answer "the same" as movement because it differed from the
+# reference *string*.
+SAME_RE = re.compile(
+    r"\b(the same|same|identical|unchanged|no change|no visible change|"
+    r"nothing|none|bez zmian|tak samo|to samo|bez r[oó][zż]nicy)\b"
+)
+
+CHANGE_RE = re.compile(
+    r"\b(moved|shifted|different|differs|changed|elsewhere|"
+    r"przesun\w*|zmien\w*|inn\w*)\b"
+)
+
+
+ORDINALS = {
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
+    "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
+}
+
+
+def _numbers(text: str) -> set:
+    """Positions named numerically — "LED 3", "the second one"."""
+    found = {int(tok) for tok in re.findall(r"\b\d+\b", text)}
+    for word, value in ORDINALS.items():
+        if re.search(rf"\b{word}\b", text):
+            found.add(value)
+    return found
+
+
+def reports_change(answer: str, reference: str) -> bool:
+    """Did this answer describe something different from the reference?
+
+    Deliberately conservative. It needs a recognisably different position, a
+    different numbered position, or an explicit word of change; anything
+    ambiguous counts as no change. A verdict that invents a finding is worse
+    than one that misses it, because the finding gets built upon.
+    """
+    low = answer.strip().lower()
+    if not low or SAME_RE.search(low):
+        return False
+    if CHANGE_RE.search(low):
+        return True
+
+    here, there = position(reference), position(answer)
+    if here and there and here != there:
+        return True
+
+    mine, theirs = _numbers(reference.lower()), _numbers(low)
+    if mine and theirs and mine != theirs:
+        return True
+
+    return False
+
+
 def classify(answer: str) -> List[str]:
     """Which outcomes an answer reports. Empty means 'could not tell'.
 
@@ -1410,11 +1466,10 @@ def verdict_offset(answers: Dict[str, str]) -> str:
         lines.append(f"  {key:12} {answer}")
     lines.append("")
 
-    reference = answers.get("reference", "").strip().lower()
+    reference = answers.get("reference", "")
     moved = [
         key for key, answer in answers.items()
-        if key != "reference" and answer.strip().lower() != reference
-        and answer.strip() and "no visible change" not in answer.lower()
+        if key != "reference" and reports_change(answer, reference)
     ]
 
     if moved:

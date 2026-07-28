@@ -533,3 +533,70 @@ class TestVerdictOffset:
 
     def test_every_trial_is_echoed(self):
         assert "somewhere odd" in probe.verdict_offset({"reference": "somewhere odd"})
+
+
+class TestReportsChange:
+    """One shared change-detector, because ad-hoc string comparison has
+    produced three separate false-positive verdicts in this project."""
+
+    REFERENCE = "small part of bottom left segment"
+
+    @pytest.mark.parametrize(
+        "answer",
+        ["the same", "same", "The same", "no change", "identical",
+         "unchanged", "bez zmian", "to samo", "", "   "],
+    )
+    def test_answers_meaning_nothing_changed(self, answer):
+        assert not probe.reports_change(answer, self.REFERENCE)
+
+    @pytest.mark.parametrize(
+        "answer",
+        ["top right now", "moved to the right", "shifted by one",
+         "przesunięty w prawo", "bottom right segment"],
+    )
+    def test_answers_describing_a_change(self, answer):
+        assert probe.reports_change(answer, self.REFERENCE)
+
+    def test_the_same_place_worded_differently_is_not_a_change(self):
+        assert not probe.reports_change("bottom left, small bit", self.REFERENCE)
+
+    def test_an_ambiguous_answer_counts_as_no_change(self):
+        # Inventing a finding is worse than missing one; it gets built upon.
+        assert not probe.reports_change("hard to say really", self.REFERENCE)
+
+
+class TestVerdictOffsetAfterFix:
+    def test_the_real_session_reports_no_movement(self):
+        text = probe.verdict_offset({
+            "reference": "small part of bottom left segment",
+            "byte2 = 01": "the same",
+            "byte2 = 08": "the same",
+            "byte3 = 00": "the same",
+            "byte3 = d1": "the same",
+        })
+        assert "Nothing moved" in text
+        assert "offsets the write" not in text
+
+    def test_genuine_movement_is_still_reported(self):
+        text = probe.verdict_offset(
+            {"reference": "bottom left", "byte2 = 01": "top right"}
+        )
+        assert "offsets the write" in text
+
+
+class TestNumberedPositions:
+    def test_a_different_ordinal_is_a_change(self):
+        assert probe.reports_change("second led", "first led")
+
+    def test_a_different_digit_is_a_change(self):
+        assert probe.reports_change("LED 9", "LED 1")
+
+    def test_the_same_ordinal_is_not_a_change(self):
+        assert not probe.reports_change("first led again", "first led")
+
+    def test_numbers_only_on_one_side_are_not_evidence(self):
+        assert not probe.reports_change("LED 4", "somewhere in the corner")
+
+    def test_a_same_marker_still_wins_over_numbers(self):
+        # "the same" is decisive whatever else the sentence contains.
+        assert not probe.reports_change("the same, led 9", "led 1")

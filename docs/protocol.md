@@ -263,22 +263,40 @@ distinguish "the same gap" from "one additional gap". A question that
 presupposes its answer collects no evidence. The conclusion rests on trial
 three, which was unambiguous.
 
-### Open: one LED past the end of the report
+### 56 LEDs is the full reach of this report
 
-With `DATA_FIRST = 8` the report reaches 56 LEDs, and one LED remains dark — sat
-immediately beside LED 0, mid bottom-left. That is where the *last* LED of a
-strip lands when the strip starts mid-segment and wraps.
+`probe.py experiment offset`, 2026-07-29. A single lit LED, with bytes 2 and 3
+varied. **Every trial returned "the same"** — the lit LED did not move for
+`byte2 = 01`, `byte2 = 08`, `byte3 = 00` or `byte3 = d1`.
 
-Excluded as the mechanism for reaching it: byte 1 (ignored — writing chunk 1
-produced an identical result), byte 7 (no effect at `3f` or `ff`), and the
-`chunk` parameter generally. Bytes 2 and 3 are the only header bytes never
-varied against a lit buffer; `probe.py experiment offset` tests them, using a
-single lit LED so an offset shows as movement rather than as one gap closing.
+Everything that could plausibly offset or page the write is now excluded:
 
-If neither moves it, the alternative is a hardware fault, which the monitor's
-own OSD effects would settle.
+| Byte | Verdict |
+|---|---|
+| 1 (chunk) | ignored — writing chunk 1 gave an identical result |
+| 2 | no effect |
+| 3 | no effect on output (but see the status tag below) |
+| 7 | no effect at `0f`, `3f` or `ff` |
 
-### Reply byte 0 echoes an opcode
+So this report shape addresses exactly 56 LEDs, and one LED beside LED 0
+remains dark. Either it belongs to a report we have not found, or it is a
+hardware fault — which the monitor's own OSD effects would settle in seconds.
+
+### Reply byte 3 carries a request tag
+
+Sending byte 3 = `0xd1` instead of `0xd0` changed the reply status from `0x80`
+to `0x81`. The low nibble of the request's byte 3 is echoed in the reply's
+status byte:
+
+```
+status = 0x80 | (request_byte3 & 0x0f)     accepted
+         0xf0 | …                          rejected
+```
+
+Not needed for control, but it means a request can be tagged and its
+acknowledgement matched to it — useful if writes are ever pipelined.
+
+### Reply byte 0 echoes an opcode### Reply byte 0 echoes an opcode
 
 | TX byte 0 | RX byte 0 |
 |---|---|
