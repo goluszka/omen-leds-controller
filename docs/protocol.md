@@ -455,6 +455,21 @@ Every `0x01` packet sent so far — varying marker, mode, effect and RGB — cha
 the lighting in no observable way, while `0x05` and `0x0d` both did. `0x01` is
 accepted (it echoes) but its effect, if any, is not visual.
 
+## Brightness
+
+Implemented in software: `omenled.protocol.scale` multiplies the intensities and
+`omenled.cli brightness <0-100>` re-renders the remembered frame. The frame is
+stored unscaled so repeated dimming does not compound.
+
+**Hardware brightness is untested, not absent.** Bytes 1 and 2 light nothing on
+their own, but that was measured with every pixel at zero — and a global
+multiplier applied to an all-black frame is equally invisible. This is the same
+empty-buffer trap that hid the pixel bytes for four passes, so those bytes are
+not ruled out. `probe.py experiment hwbright` retests them against a lit frame.
+
+If a hardware control exists it is worth preferring: it keeps the full 8 bits
+per channel, where software scaling quantises at low settings.
+
 ## Open questions
 
 The write path is complete: 60 LEDs, full RGB each, whole diamond addressable.
@@ -464,5 +479,5 @@ What remains is refinement.
    Needed before named zones like `--zone bottom-left` are possible.
 2. What hands control back to the OSD? Still unknown after nine candidates.
    USB replug or a monitor reset are the only known clears.
-3. Is there a brightness control separate from scaling the intensities?
+3. Is there a hardware brightness byte? (`experiment hwbright`)
 4. Do any other opcodes do anything? `experiment opcodes` has never been run.

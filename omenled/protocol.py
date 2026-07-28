@@ -304,6 +304,19 @@ def frame_packets(pixels: Sequence[Tuple[int, int, int]], chunk: int = 0) -> Lis
     ]
 
 
+def scale(pixels: Sequence[Tuple[int, int, int]], percent: int
+          ) -> List[Tuple[int, int, int]]:
+    """Scale pixel intensities to a percentage of full brightness.
+
+    Linear, because the intensity byte appears to be linear and nothing we can
+    measure would justify a gamma curve. Rounding is half-up per channel, so a
+    colour never drifts hue as it dims.
+    """
+    if not 0 <= percent <= 100:
+        raise ValueError(f"brightness must be 0..100, got {percent}")
+    return [tuple(round(c * percent / 100) for c in px) for px in pixels]
+
+
 def parse_colour(text: str) -> Tuple[int, int, int]:
     """`#rrggbb`, `rrggbb`, `#rgb`, or a handful of names."""
     named = {

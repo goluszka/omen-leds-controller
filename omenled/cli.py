@@ -3,7 +3,12 @@
     python3 -m omenled.cli fill '#ff0000'
     python3 -m omenled.cli set 0 green
     python3 -m omenled.cli gradient red blue
+    python3 -m omenled.cli brightness 40
     python3 -m omenled.cli off
+
+Brightness is applied in software by scaling the intensities. The last frame is
+remembered at full intensity, so `brightness` re-dims the same picture instead
+of compounding.
 
 Sending anything puts the monitor into software-controlled mode, which locks
 the OSD lighting menu. No release command is known yet; unplugging the USB
@@ -17,9 +22,19 @@ import sys
 import time
 from typing import List, Optional
 
-from . import protocol
+from . import protocol, state
 from .device import Lighting, RenderRejected, connect
 from .transport import DeviceNotFound, TransportError
+
+
+def percent(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number 0-100")
+    if not 0 <= value <= 100:
+        raise argparse.ArgumentTypeError(f"brightness must be 0-100, got {value}")
+    return value
 
 
 def colour(text: str):
@@ -29,27 +44,63 @@ def colour(text: str):
         raise argparse.ArgumentTypeError(str(exc))
 
 
+def _show(lights: Lighting, args) -> int:
+    """Apply brightness to the framebuffer, render, and remember the original.
+
+    The frame is saved before scaling so `brightness` later re-dims the picture
+    the user asked for rather than compounding on an already-dimmed one.
+    """
+    base = list(lights.pixels)
+    percent = args.brightness if args.brightness is not None else _remembered_brightness()
+    lights.set_all(protocol.scale(base, percent)).render(dry_run=args.dry_run)
+    if not args.dry_run:
+        state.save(base, percent)
+    return 0
+
+
+def _remembered_brightness() -> int:
+    remembered = state.load()
+    return remembered[1] if remembered else 100
+
+
 def cmd_off(lights: Lighting, args) -> int:
     lights.off(dry_run=args.dry_run)
+    if not args.dry_run:
+        state.save(lights.pixels, _remembered_brightness())
     return 0
 
 
 def cmd_fill(lights: Lighting, args) -> int:
-    lights.fill(args.colour).render(dry_run=args.dry_run)
-    return 0
+    lights.fill(args.colour)
+    return _show(lights, args)
 
 
 def cmd_set(lights: Lighting, args) -> int:
-    if not args.keep:
-        lights.fill((0, 0, 0))
+    if args.keep:
+        remembered = state.load()
+        if remembered:
+            lights.set_all(remembered[0][:lights.count])
     for index in args.index:
         lights.set_led(index, args.colour)
-    lights.render(dry_run=args.dry_run)
-    return 0
+    return _show(lights, args)
 
 
 def cmd_gradient(lights: Lighting, args) -> int:
-    lights.gradient(args.start, args.end).render(dry_run=args.dry_run)
+    lights.gradient(args.start, args.end)
+    return _show(lights, args)
+
+
+def cmd_brightness(lights: Lighting, args) -> int:
+    """Re-render the remembered frame at a new brightness."""
+    remembered = state.load()
+    if remembered is None:
+        print("nothing rendered yet — run fill, set or gradient first",
+              file=sys.stderr)
+        return 1
+    base = remembered[0][:lights.count]
+    lights.set_all(protocol.scale(base, args.percent)).render(dry_run=args.dry_run)
+    if not args.dry_run:
+        state.save(base, args.percent)
     return 0
 
 
@@ -72,6 +123,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dry-run", action="store_true",
                         help="show what would be sent without sending it")
+    parser.add_argument("--brightness", type=percent, default=None, metavar="0-100",
+                        help="scale intensities; defaults to the last value used")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("off", help="blank every LED")
@@ -92,6 +145,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("start", type=colour)
     p.add_argument("end", type=colour)
     p.set_defaults(func=cmd_gradient)
+
+    p = sub.add_parser("brightness", help="re-dim the current picture")
+    p.add_argument("percent", type=percent, metavar="0-100")
+    p.set_defaults(func=cmd_brightness)
 
     p = sub.add_parser("chase", help="walk one lit LED along the strip")
     p.add_argument("colour", type=colour, nargs="?", default=(0xFF, 0xFF, 0xFF))

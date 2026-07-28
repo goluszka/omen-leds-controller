@@ -2,8 +2,8 @@
 
 Software control of the HP OMEN 27k monitor's external lighting, from macOS.
 
-No public decode of this protocol exists, so the work is in two phases.
-**Phase 1 (current): decode the protocol.** Phase 2: the CLI.
+No public decode of this protocol existed when this started. The protocol is now
+decoded and the CLI works: **60 individually addressable LEDs, full RGB each.**
 
 ## Where things stand
 
@@ -32,12 +32,22 @@ legacy/          Earlier exploratory scripts, kept for reference. See the
 
 ## Using the workbench
 
+## Controlling the lighting
+
 ```sh
-python3 tools/probe.py info        # device facts, transmits nothing
+python3 -m omenled.cli fill '#00ff00'      # whole diamond green
+python3 -m omenled.cli set 0 5 10 red      # specific LEDs
+python3 -m omenled.cli gradient red blue   # fade across the strip
+python3 -m omenled.cli brightness 40       # re-dim the current picture
+python3 -m omenled.cli chase               # walk one LED, maps index to position
+python3 -m omenled.cli off
+```
+
+60 LEDs, full RGB each. Add `--dry-run` to any command to see the exact bytes
+without sending them.
+
 python3 tools/probe.py baseline    # what is readable before provoking anything
-python3 tools/probe.py release     # hunt for the OSD handover command
-python3 tools/probe.py query -r 255 --observe
-python3 tools/probe.py sweep --byte 4 --values 0x00:0xff --observe
+python3 tools/probe.py experiment  # list the curated experiments
 python3 tools/probe.py sessions    # what has been recorded
 ```
 
@@ -54,5 +64,5 @@ Python 3.9+ with `hid` (cython-hidapi), and Homebrew `hidapi`. Both are already
 present on this machine.
 
 ```sh
-python3 -m pytest tests/ -q      # 72 tests, no hardware needed
+python3 -m pytest tests/ -q      # 347 tests, no hardware needed
 ```

@@ -341,8 +341,11 @@ SAME_RE = re.compile(
 )
 
 CHANGE_RE = re.compile(
+    # Comparatives only. A bare "dark" appears in answers meaning "still dark",
+    # so only "darker" is taken as evidence of a change.
     r"\b(moved|shifted|different|differs|changed|elsewhere|"
-    r"przesun\w*|zmien\w*|inn\w*)\b"
+    r"brighter|dimmer|darker|brightened|dimmed|"
+    r"przesun\w*|zmien\w*|inn\w*|ja[sś]niej\w*|ciemniej\w*)\b"
 )
 
 
@@ -1589,7 +1592,82 @@ def verdict_headerleds(answers: Dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def exp_hwbright(link, journal, timeout: int) -> Dict[str, str]:
+    """Is there a hardware brightness control in the header?
+
+    Bytes 1 and 2 light nothing on their own, but that was measured with every
+    pixel at zero — and a global brightness multiplier applied to an all-black
+    frame does nothing visible either. The same empty-buffer trap hid the pixel
+    bytes for four passes, so they are re-tested here against a lit frame.
+
+    The frame sits at half intensity so a change in either direction shows.
+    """
+    blank = protocol.build_probe(opcode=OP_BLANK)
+    answers: Dict[str, str] = {}
+
+    def frame(offset: Optional[int] = None, value: int = 0x00) -> List[bytes]:
+        out = []
+        for plane in protocol.PLANES:
+            packet = protocol.plane_packet(plane, [0x80] * protocol.LED_COUNT)
+            if offset is not None:
+                packet = protocol.with_byte(packet, offset, value)
+            out.append(packet)
+        return out
+
+    def trial(key: str, packets: List[bytes]) -> None:
+        print(f"\n{key}")
+        answers[key] = _step(link, journal, f"hwbright:{key}", packets,
+                             "brighter, dimmer, or the same?", timeout)
+
+    print("Every trial writes the same half-brightness white frame and changes")
+    print("one header byte. Say brighter, dimmer, or the same.\n")
+
+    trial("reference", [blank] + frame())
+    for offset in (1, 2):
+        for value in (0xFF, 0x01):
+            trial(f"byte{offset} = {value:02x}", [blank] + frame(offset, value))
+    trial("byte3 = 00", [blank] + frame(3, 0x00))
+    trial("byte3 = f0", [blank] + frame(3, 0xF0))
+    return answers
+
+
+def verdict_hwbright(answers: Dict[str, str]) -> str:
+    lines = ["trials:", ""]
+    for key, answer in answers.items():
+        lines.append(f"  {key:14} {answer}")
+    lines.append("")
+
+    reference = answers.get("reference", "")
+    changed = [k for k, v in answers.items()
+               if k != "reference" and reports_change(v, reference)]
+
+    if changed:
+        lines += [
+            f"Brightness changed with: {', '.join(changed)}.",
+            "",
+            "That byte is a hardware brightness control. Sweep it to find the",
+            "range, then expose it in omenled instead of scaling the pixel",
+            "values — hardware dimming keeps the full 8 bits of colour, where",
+            "software scaling loses precision at low levels.",
+        ]
+    else:
+        lines += [
+            "No header byte changed the brightness, tested against a lit frame",
+            "this time rather than an empty one.",
+            "",
+            "There is no hardware brightness control in this report. Software",
+            "scaling is the answer, which omenled already does:",
+            "  python3 -m omenled.cli brightness 40",
+            "",
+            "The only cost is precision at very low settings, where 8-bit",
+            "channels quantise — 10% of a mid grey is a handful of levels.",
+        ]
+    return "\n".join(lines)
+
+
 EXPERIMENTS = {
+    "hwbright": (exp_hwbright, verdict_hwbright,
+                 "is there a hardware brightness byte in the header?"),
     "headerleds": (exp_headerleds, verdict_headerleds,
                    "are bytes 1..7 header, or LEDs we have been pinning?"),
     "offset": (exp_offset, verdict_offset,
