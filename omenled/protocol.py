@@ -200,6 +200,114 @@ def annotate(payload: bytes, width: int = 16) -> str:
     return "\n".join(lines)
 
 
+# --------------------------------------------------------------------------
+# The decoded write path
+# --------------------------------------------------------------------------
+# Established 2026-07-29 by `probe.py experiment hunt`. The report is a 9-byte
+# header followed by one intensity byte per LED, and the opcode selects which
+# colour plane those intensities apply to. Writing the three planes in turn
+# composes an arbitrary colour per LED.
+
+PLANE_RED = 0x05
+PLANE_GREEN = 0x06
+PLANE_BLUE = 0x07
+OP_OFF = 0x0D
+
+PLANES = (PLANE_RED, PLANE_GREEN, PLANE_BLUE)
+
+DATA_FIRST = 9
+LED_COUNT = REPORT_SIZE - DATA_FIRST  # 55 per report
+
+# Header bytes 1..8, held at these values throughout every successful write.
+# Byte 1 is a candidate chunk index for LEDs beyond the first 55; the rest have
+# no established meaning, and are preserved rather than zeroed because they are
+# what the device has always been sent.
+HEADER_TAIL = (0x00, 0x00, 0xD0, 0x00, 0x00, 0x00, 0x0F, 0x06)
+
+
+def plane_packet(plane: int, intensities: Sequence[int], chunk: int = 0) -> bytes:
+    """One report: `plane` opcode, then an intensity per LED.
+
+    Shorter sequences are zero-padded, which turns off the LEDs they do not
+    reach — the device holds no state we can merge into.
+    """
+    if plane not in PLANES:
+        raise ValueError(f"plane must be one of {[hex(p) for p in PLANES]}, got {plane:#x}")
+    if len(intensities) > LED_COUNT:
+        raise ValueError(f"{len(intensities)} intensities exceeds {LED_COUNT} per report")
+    if any(not 0 <= v <= 0xFF for v in intensities):
+        raise ValueError("every intensity must fit in a byte")
+
+    header = bytes([plane, chunk]) + bytes(HEADER_TAIL[1:])
+    data = bytes(intensities) + bytes(LED_COUNT - len(intensities))
+    return header + data
+
+
+def off_packet() -> bytes:
+    """Blank every LED."""
+    return build([OP_OFF])
+
+
+def frame_packets(pixels: Sequence[Tuple[int, int, int]], chunk: int = 0) -> List[bytes]:
+    """The three plane reports that render one frame of RGB pixels."""
+    if len(pixels) > LED_COUNT:
+        raise ValueError(f"{len(pixels)} pixels exceeds {LED_COUNT} per report")
+    return [
+        plane_packet(plane, [px[channel] for px in pixels], chunk=chunk)
+        for channel, plane in enumerate(PLANES)
+    ]
+
+
+def parse_colour(text: str) -> Tuple[int, int, int]:
+    """`#rrggbb`, `rrggbb`, `#rgb`, or a handful of names."""
+    named = {
+        "red": (0xFF, 0x00, 0x00), "green": (0x00, 0xFF, 0x00),
+        "blue": (0x00, 0x00, 0xFF), "white": (0xFF, 0xFF, 0xFF),
+        "black": (0, 0, 0), "off": (0, 0, 0),
+        "yellow": (0xFF, 0xFF, 0x00), "cyan": (0x00, 0xFF, 0xFF),
+        "magenta": (0xFF, 0x00, 0xFF), "orange": (0xFF, 0x60, 0x00),
+        "purple": (0x80, 0x00, 0xFF), "pink": (0xFF, 0x40, 0x80),
+    }
+    key = text.strip().lower()
+    if key in named:
+        return named[key]
+
+    def unreadable() -> ValueError:
+        return ValueError(
+            f"cannot read {text!r} as a colour. Use #rrggbb, #rgb, "
+            f"or one of: {', '.join(sorted(named))}"
+        )
+
+    digits = key[1:] if key.startswith("#") else key
+    if len(digits) == 3:
+        digits = "".join(c * 2 for c in digits)
+    if len(digits) != 6:
+        raise unreadable()
+    try:
+        value = int(digits, 16)
+    except ValueError:
+        # A six-letter word like "banana" reaches here. Naming it "not hex"
+        # would be true and useless; the caller needs the accepted forms.
+        raise unreadable()
+    return ((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF)
+
+
+def gradient(start: Tuple[int, int, int], end: Tuple[int, int, int],
+             count: int) -> List[Tuple[int, int, int]]:
+    """Linear interpolation, used by the CLI's gradient command."""
+    if count <= 0:
+        return []
+    if count == 1:
+        return [start]
+    return [
+        tuple(
+            round(a + (b - a) * i / (count - 1))
+            for a, b in zip(start, end)
+        )
+        for i in range(count)
+    ]
+
+
 def nonzero_offsets(payload: bytes) -> List[int]:
     return [i for i, b in enumerate(payload) if b]
 

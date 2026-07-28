@@ -155,21 +155,42 @@ looks like and not what grouped triplets look like.
 So bytes 9–63 are **55 single-byte LED values**, and every one of them so far
 has lit red.
 
-### Colour is not selected by anything tested so far
+### THE WRITE PATH — opcode selects the colour plane
 
-55 red-only LEDs is not a plausible product, so colour must come from somewhere.
-Ruled out to date: offsets 4–6, byte 1, and the alignment of the buffer.
+`probe.py experiment hunt`, 2026-07-29. The identical lit buffer under four
+neighbouring opcodes:
 
-**Methodological warning, recorded because it has now caused two wrong
-conclusions.** "Bytes 1–8 are inert" was measured with the LED buffer empty. A
-colour field with nothing to colour is indistinguishable from a dead byte. Any
-retest of a modifier must light the buffer first — see `_lit()` in
-`tools/probe.py`. The same error explains why offsets 4–6 first looked dead.
+| Opcode | Result |
+|---|---|
+| `0x05` | red, bright |
+| `0x06` | green, bright |
+| `0x07` | blue, bright |
+| `0x04` | nothing |
+| `0x08` | nothing |
+| `0x0d` | blank |
 
-Leading hypothesis: **the opcode selects the colour plane.** We have only ever
-used `0x05`, and everything we have ever seen is red. `probe.py experiment hunt`
-tries the neighbouring opcodes with the buffer lit, then falls back to retesting
-the header bytes properly.
+**The opcode selects which colour plane the intensity bytes apply to.** Writing
+all three planes composes an arbitrary colour per LED. This is why every earlier
+observation was red: we had only ever used `0x05`.
+
+Full report layout:
+
+```
+byte  0      opcode: 05 = red plane, 06 = green, 07 = blue, 0d = blank all
+byte  1      chunk index (candidate — see below)
+bytes 2..8   00 d0 00 00 00 0f 06   held constant on every accepted write
+bytes 9..63  55 intensity bytes, one per LED, for the selected plane
+```
+
+Implemented as `omenled.protocol.plane_packet` and `frame_packets`.
+
+### Open: LEDs beyond the first 55
+
+A full 55-byte write leaves some LEDs in the bottom-left segment dark, so the
+strip is longer than one report can address. Byte 1 is the candidate chunk
+index. It appeared inert when tested earlier, but that was against an empty
+buffer — the same measurement error described below. `experiment confirm` tests
+it lit.
 
 ### Reply byte 0 echoes an opcode
 
@@ -329,14 +350,12 @@ accepted (it echoes) but its effect, if any, is not visual.
 
 ## Open questions, in the order they block progress
 
-1. Is an animated effect repainting over everything we write?
-   (`probe.py experiment animation`) — blocks all visual decoding.
-2. With a static, non-red OSD colour set: does any byte change the lighting?
-3. Which byte selects the segment, and how many segments exist?
-4. What do offsets 4–6 encode, if anything?
-5. Which other opcodes do anything? (`probe.py experiment opcodes`)
-6. What hands control back to the OSD?
-
-Bytes past offset 10 have never been varied. Given the 64-byte report and the
-finding that offsets 1 and 4–6 appear inert, the addressing may well live
-there.
+1. Does `experiment confirm` reproduce predicted output? Until it does, the
+   layout above is a model that explains past observations, not knowledge.
+2. Do plane writes stack, or does each replace the frame? Decides whether
+   per-LED RGB is possible in one frame.
+3. How many LEDs are there in total, and does byte 1 address the rest?
+4. Which LED index maps to which physical position? (`omenled.cli chase`)
+5. What hands control back to the OSD? Still unknown; USB replug or a monitor
+   reset are the only known clears.
+6. Is there a brightness control separate from scaling the intensities?

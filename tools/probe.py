@@ -1078,7 +1078,94 @@ def verdict_hunt(answers: Dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def exp_confirm(link, journal, timeout: int) -> Dict[str, str]:
+    """Predict, then send, then check — the gate between model and fact.
+
+    Each trial states what should happen before the packet goes out. A model
+    that only ever explains observations already taken is not yet knowledge;
+    this is what promotes the plane decoding from HYPOTHESIS to CONFIRMED.
+
+    Two things beyond the model are settled here: whether plane writes
+    accumulate or replace each other, and whether byte 1 addresses the LEDs
+    beyond the first 55 that the whole-buffer write left dark.
+    """
+    blank = protocol.build_probe(opcode=OP_BLANK)
+    answers: Dict[str, str] = {}
+
+    def trial(key: str, prediction: str, packets: List[bytes], question: str) -> None:
+        print(f"\n{key}")
+        print(f"  predicting: {prediction}")
+        answers[key] = _step(link, journal, f"confirm:{key}", packets, question, timeout)
+
+    one_red = protocol.plane_packet(protocol.PLANE_RED, [0xFF])
+    one_blue = protocol.plane_packet(protocol.PLANE_BLUE, [0xFF])
+    one_green = protocol.plane_packet(protocol.PLANE_GREEN, [0xFF])
+
+    trial("single LED", "exactly ONE LED lit, red, at one end of the strip",
+          [blank, one_red], "how many LEDs lit, what colour, and where?")
+
+    trial("plane persistence",
+          "adding the blue plane WITHOUT blanking: magenta if planes stack, "
+          "blue if each write replaces the frame",
+          [one_blue], "colour of that LED now? (magenta / blue / other)")
+
+    trial("white LED", "one LED, white",
+          [blank, one_red, one_green, one_blue], "colour of the lit LED?")
+
+    half = protocol.LED_COUNT // 2
+    trial("two-tone",
+          f"first {half} LEDs red, remaining {protocol.LED_COUNT - half} blue",
+          [blank,
+           protocol.plane_packet(protocol.PLANE_RED, [0xFF] * half),
+           protocol.plane_packet(protocol.PLANE_BLUE,
+                                 [0x00] * half + [0xFF] * (protocol.LED_COUNT - half))],
+          "describe what you see")
+
+    trial("chunk 1",
+          "if byte 1 is a chunk index, the LEDs left dark by a full write now light",
+          [blank,
+           protocol.plane_packet(protocol.PLANE_RED, [0xFF] * protocol.LED_COUNT),
+           protocol.plane_packet(protocol.PLANE_RED, [0xFF] * protocol.LED_COUNT, chunk=1)],
+          "is the whole diamond lit now, including the previously dark LEDs?")
+    return answers
+
+
+def verdict_confirm(answers: Dict[str, str]) -> str:
+    lines = ["predictions and outcomes:", ""]
+    for key, answer in answers.items():
+        lines.append(f"  {key:18} {answer}")
+    lines.append("")
+
+    persistence = answers.get("plane persistence", "").lower()
+    stacks = "magenta" in persistence
+    replaces = "blue" in persistence and not stacks
+
+    if stacks:
+        lines.append("Plane writes STACK — each plane is independent, so a frame is")
+        lines.append("three packets and colour composes as expected.")
+    elif replaces:
+        lines.append("Plane writes REPLACE the frame — the last plane written wins.")
+        lines.append("That would make per-LED RGB impossible in one frame, and the")
+        lines.append("earlier green and blue results were whole-frame writes, not")
+        lines.append("composition. Colour would be limited to one plane at a time.")
+    else:
+        lines.append("Plane persistence unclear from that answer — re-run it alone.")
+
+    lines.append("")
+    if "white" in classify(answers.get("white LED", "")):
+        lines.append("White from three plane writes: composition confirmed.")
+    if "chunk 1" in answers:
+        lines.append(f"chunk index: {answers['chunk 1']}")
+    lines.append("")
+    lines.append("If the single-LED and two-tone trials matched their predictions,")
+    lines.append("the write path is CONFIRMED and the CLI is ready to use:")
+    lines.append("  python3 -m omenled.cli fill '#00ff00'")
+    return "\n".join(lines)
+
+
 EXPERIMENTS = {
+    "confirm": (exp_confirm, verdict_confirm,
+                "predict-then-verify the decoded plane write path"),
     "hunt": (exp_hunt, verdict_hunt,
              "where does colour come from — plane opcodes or header bytes?"),
     "stream": (exp_stream, verdict_stream,
