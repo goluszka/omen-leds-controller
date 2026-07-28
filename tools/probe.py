@@ -23,6 +23,7 @@ import argparse
 import os
 import re
 import sys
+import time
 from typing import Dict, List, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -574,27 +575,170 @@ def exp_zones(link, journal, timeout: int) -> Dict[str, str]:
     return answers
 
 
+# Position vocabulary. Comparing raw answer strings does not work: "left
+# bottom" and "left bottom, slighlty shifted" are the same place described
+# twice, and treating them as two positions once produced a confident verdict
+# that byte 1 was the segment selector when it had changed nothing at all.
+_VERTICAL = {
+    "bottom": ("bottom", "lower", "dol", "dół", "doln"),
+    "top": ("top", "upper", "gora", "góra", "górn", "gorn"),
+}
+_HORIZONTAL = {
+    "left": ("left", "lew"),
+    "right": ("right", "praw"),
+}
+
+
+def _first_match(text: str, vocabulary: Dict[str, tuple]) -> Optional[str]:
+    """The vocabulary term appearing earliest in the answer.
+
+    Earliest wins because an answer like "bottom left, with a slight part of
+    the right bottom segment" is naming a primary position and then qualifying
+    it; the qualifier must not outvote the subject.
+    """
+    best, best_at = None, len(text) + 1
+    for name, words in vocabulary.items():
+        for word in words:
+            at = text.find(word)
+            if at != -1 and at < best_at:
+                best, best_at = name, at
+    return best
+
+
+def position(answer: str) -> Optional[tuple]:
+    """Normalise a free-text answer to a (vertical, horizontal) position."""
+    low = answer.lower()
+    vertical = _first_match(low, _VERTICAL)
+    horizontal = _first_match(low, _HORIZONTAL)
+    if vertical is None and horizontal is None:
+        return None
+    return (vertical, horizontal)
+
+
 def verdict_zones(answers: Dict[str, str]) -> str:
     lit = {k: v for k, v in answers.items() if v and "nothing" not in classify(v)}
     if not lit:
         return ("Byte 1 lit nothing at any value 00-07. It is not the segment\n"
                 "selector — try byte 2, or the bytes past offset 10.")
-    distinct = len(set(lit.values()))
-    lines = [f"byte 1 lit something at {len(lit)} of 8 values, "
-             f"{distinct} distinct position(s):"]
+
+    positions = {k: position(v) for k, v in lit.items()}
+    distinct = {p for p in positions.values() if p is not None}
+
+    lines = [f"byte 1 lit something at {len(lit)} of 8 values:"]
     for key, answer in lit.items():
-        lines.append(f"  {key} -> {answer}")
+        where = positions[key]
+        shown = "-".join(p for p in where if p) if where else "unrecognised"
+        lines.append(f"  {key} -> {shown:14} ({answer})")
     lines.append("")
-    if distinct == 1:
-        lines.append("Every value lit the same place, so byte 1 does not select the")
-        lines.append("segment. The selector is a different offset.")
+
+    if len(distinct) <= 1:
+        lines.append("Every value lit the same position, so byte 1 does not select")
+        lines.append("the segment. Wording differences between answers are not")
+        lines.append("evidence of movement.")
+        lines.append("")
+        lines.append("Before trying another offset: if the lighting is animated, no")
+        lines.append("byte will appear to do anything, because the effect repaints")
+        lines.append("over whatever we write. Run `experiment animation` first.")
     else:
-        lines.append("Byte 1 moves the lit segment — it is the segment selector.")
-        lines.append("Next: extend the range past 07 to find how many segments exist.")
+        lines.append(f"Byte 1 lit {len(distinct)} genuinely different positions, so it")
+        lines.append("is a candidate segment selector.")
+        lines.append("Confirm by predicting a position before sending, then extend")
+        lines.append("the range past 07 to count the segments.")
+    return "\n".join(lines)
+
+
+def _pause(seconds: int) -> None:
+    print(f"  ...watching for {seconds}s, don't touch anything...")
+    time.sleep(seconds)
+
+
+def exp_animation(link, journal, timeout: int) -> Dict[str, str]:
+    """Is the lighting animated, and does 0x05 restore the monitor's own effect?
+
+    A control experiment, not a decode. If an effect is running, it repaints
+    over anything we write, every byte looks inert, and each observation is a
+    snapshot of the animation rather than a response to our packet. That failure
+    mode is invisible from inside the data — a constant colour with drifting
+    geometry looks exactly like a protocol we have not cracked yet — so the
+    observation channel gets validated before more effort is spent on it.
+    """
+    answers: Dict[str, str] = {}
+
+    print("\n1/5  no packets sent — just watch")
+    _pause(15)
+    answers["idle_moves"] = _step(
+        link, journal, "exp:anim:idle", [],
+        "Did the lighting move, pulse or change by itself? (yes/no)", timeout)
+
+    print("\n2/5  sending 0d")
+    answers["after_off"] = _step(
+        link, journal, "exp:anim:off", [protocol.build_probe(opcode=OP_BLANK)],
+        "Lighting off now? (yes/no)", timeout)
+
+    print("\n3/5  waiting, sending nothing")
+    _pause(10)
+    answers["off_persists"] = _step(
+        link, journal, "exp:anim:off-persists", [],
+        "Still off, or did it come back on by itself? (still off / came back)", timeout)
+
+    print("\n4/5  sending 05")
+    answers["after_on"] = _step(
+        link, journal, "exp:anim:on",
+        [protocol.build_probe(r=0xFF, g=0xFF, b=0xFF, opcode=OP_SET)],
+        "Describe exactly what is lit — colour and position", timeout)
+
+    print("\n5/5  waiting, sending nothing")
+    _pause(10)
+    answers["on_drifts"] = _step(
+        link, journal, "exp:anim:on-drifts", [],
+        "Has it changed since your last answer? (yes/no)", timeout)
+    return answers
+
+
+def _affirmative(answer: str) -> bool:
+    return bool(re.search(r"\b(yes|yeah|yep|tak|came back|moved|moves)\b", answer.lower()))
+
+
+def verdict_animation(answers: Dict[str, str]) -> str:
+    idle = _affirmative(answers.get("idle_moves", ""))
+    drifts = _affirmative(answers.get("on_drifts", ""))
+    returned = _affirmative(answers.get("off_persists", ""))
+
+    lines = []
+    if idle or drifts:
+        lines += [
+            "An animation IS running.",
+            "",
+            "Every observation taken while it runs is a snapshot of the effect,",
+            "not a response to our packet. That invalidates the colour and zone",
+            "results: the constant red with drifting geometry was the effect",
+            "moving between answers, not a field we failed to decode.",
+            "",
+            "Required before any further decoding: set the lighting to a STATIC",
+            "colour in the OSD, and pick one that is not red — green or blue —",
+            "so anything we successfully write is instantly distinguishable from",
+            "the monitor's own state.",
+        ]
+    else:
+        lines += [
+            "No animation detected. The lighting is static, so observations can",
+            "be attributed to the packets that preceded them.",
+            "",
+            "That makes the earlier results real findings: offsets 4..6 genuinely",
+            "do not carry colour, and byte 1 genuinely does not select a segment.",
+            "The addressing lives somewhere else in the 64 bytes — most likely",
+            "past offset 10, which we have never varied.",
+        ]
+
+    if returned:
+        lines += ["", "0x0d's blanking is temporary — the lighting restored itself,",
+                  "so the monitor reasserts its own state on a timer."]
     return "\n".join(lines)
 
 
 EXPERIMENTS = {
+    "animation": (exp_animation, verdict_animation,
+                  "is an effect running that repaints over everything we write?"),
     "commit": (exp_commit, verdict_commit,
                "is 0x0d an off command or the commit half of stage/commit?"),
     "opcodes": (exp_opcodes, verdict_opcodes,

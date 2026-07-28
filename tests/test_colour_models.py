@@ -78,11 +78,13 @@ class TestVerdictColour:
 
 
 class TestVerdictZones:
-    def test_distinct_positions_mean_byte_1_is_the_selector(self):
+    def test_distinct_positions_make_byte_1_a_candidate_selector(self):
         text = probe.verdict_zones(
             {"00": "bottom left", "01": "bottom right", "02": "top left"}
         )
-        assert "is the segment selector" in text
+        # Candidate, not conclusion: it still has to survive a prediction.
+        assert "candidate segment selector" in text
+        assert "predicting a position before sending" in text
 
     def test_one_position_everywhere_means_it_is_not_the_selector(self):
         text = probe.verdict_zones({"00": "bottom left", "01": "bottom left"})
@@ -105,3 +107,77 @@ class TestRegistry:
     def test_the_known_opcodes_are_named_rather_than_inlined(self):
         assert probe.OP_SET == 0x05
         assert probe.OP_BLANK == 0x0D
+
+
+class TestPositionNormalisation:
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            "left bottom",
+            "left bottom, slighlty shifted",
+            "left bottom, slightly shifted",
+            "red left bottom segment, slightly smaller",
+            "bottom left",
+            "lewy dolny",
+        ],
+    )
+    def test_the_same_place_described_differently_normalises_alike(self, answer):
+        assert probe.position(answer) == ("bottom", "left")
+
+    def test_a_qualifier_does_not_outvote_the_subject(self):
+        # "bottom left ... slight part of right bottom" names bottom-left and
+        # then qualifies it; treating the qualifier as the answer once produced
+        # a false 'byte 1 is the selector' verdict.
+        answer = "red bottom left segment, with slight part of right bottom segment"
+        assert probe.position(answer) == ("bottom", "left")
+
+    def test_genuinely_different_places_differ(self):
+        assert probe.position("top right") != probe.position("bottom left")
+
+    def test_an_answer_with_no_position_words_is_unrecognised(self):
+        assert probe.position("it went red") is None
+
+
+class TestVerdictZonesAfterFix:
+    def test_wording_variants_do_not_count_as_movement(self):
+        text = probe.verdict_zones(
+            {
+                "00": "left bottom",
+                "01": "left bottom, slighlty shifted",
+                "02": "left bottom, slightly shifted",
+                "03": "left bottom",
+            }
+        )
+        assert "does not select" in text
+        assert "Wording differences" in text
+
+    def test_it_points_at_the_animation_control_when_nothing_moved(self):
+        text = probe.verdict_zones({"00": "left bottom", "01": "left bottom"})
+        assert "experiment animation" in text
+
+    def test_real_movement_is_still_detected(self):
+        text = probe.verdict_zones({"00": "bottom left", "01": "top right"})
+        assert "candidate segment selector" in text
+
+
+class TestVerdictAnimation:
+    def test_idle_movement_invalidates_the_earlier_results(self):
+        text = probe.verdict_animation({"idle_moves": "yes"})
+        assert "An animation IS running" in text
+        assert "invalidates" in text
+
+    def test_drift_after_a_write_also_counts(self):
+        text = probe.verdict_animation({"idle_moves": "no", "on_drifts": "yes"})
+        assert "An animation IS running" in text
+
+    def test_a_static_result_promotes_the_earlier_findings(self):
+        text = probe.verdict_animation({"idle_moves": "no", "on_drifts": "no"})
+        assert "No animation detected" in text
+        assert "past offset 10" in text
+
+    def test_polish_yes_is_understood(self):
+        assert "An animation IS running" in probe.verdict_animation({"idle_moves": "tak"})
+
+    def test_self_restoring_lighting_is_called_out(self):
+        text = probe.verdict_animation({"idle_moves": "no", "off_persists": "came back"})
+        assert "temporary" in text

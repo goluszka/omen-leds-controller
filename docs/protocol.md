@@ -129,6 +129,38 @@ deal.
 
 **Test:** send `02`, then `00`, then read. If the reply echoes `02`, confirmed.
 
+### Suspected observation contamination — read before trusting anything below
+
+Session of 2026-07-29 ran `experiment colour` and `experiment zones`. Combined
+result, 13 trials:
+
+| Varied | Values | Result |
+|---|---|---|
+| offsets 4–6 | `ff0000`, `00ff00`, `0000ff`, `ffffff`, `000000` | red, bottom-left, every time |
+| byte 1 | `00`–`07` | red, bottom-left, every time |
+
+The lighting was **red in all 13 trials, including with colour bytes all zero**,
+and never went dark. Only the size and position of the lit region drifted, by
+small amounts, in no relation to what was sent.
+
+A field that ignores its input and drifts on its own is not a field. The reading
+that fits every observation is that **an animated effect is running on the
+monitor** and repainting over anything written, so each answer is a snapshot of
+the effect rather than a response to a packet.
+
+If that holds, it also reframes the two opcodes below: `0x05` would be *lighting
+on*, restoring the monitor's own configured effect, rather than *set a segment*.
+
+`probe.py experiment animation` decides this. Until it does, treat every
+HYPOTHESIS in this document as provisional, and note that a static, non-red OSD
+colour is a precondition for any further visual decoding — otherwise our writes
+are indistinguishable from the monitor's own state.
+
+**Process note for the next session:** the animation question was raised before
+this batch and the batch went ahead without settling it. Validate the
+observation channel before spending observations through it; a human observer is
+the scarcest resource here and 13 trials were spent producing no information.
+
 ### Offsets 4–6 are not a plain RGB triple
 
 ```
@@ -226,10 +258,14 @@ accepted (it echoes) but its effect, if any, is not visual.
 
 ## Open questions, in the order they block progress
 
-1. What do offsets 4–6 encode, given white in produced red out?
-   (`probe.py experiment colour`)
-2. Which byte selects the segment? (`probe.py experiment zones`)
-3. How many segments are there, and where is each one physically?
-4. Which other opcodes do anything? (`probe.py experiment opcodes`)
-5. What hands control back to the OSD?
-6. Is brightness a separate field or premultiplied into the colour bytes?
+1. Is an animated effect repainting over everything we write?
+   (`probe.py experiment animation`) — blocks all visual decoding.
+2. With a static, non-red OSD colour set: does any byte change the lighting?
+3. Which byte selects the segment, and how many segments exist?
+4. What do offsets 4–6 encode, if anything?
+5. Which other opcodes do anything? (`probe.py experiment opcodes`)
+6. What hands control back to the OSD?
+
+Bytes past offset 10 have never been varied. Given the 64-byte report and the
+finding that offsets 1 and 4–6 appear inert, the addressing may well live
+there.
