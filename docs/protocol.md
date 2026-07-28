@@ -237,73 +237,53 @@ everything, no part of the panel is unaddressable in principle.
 
 What remains is **exactly one LED**, mid bottom-left, that never lights.
 
-### CONFIRMED: the LED data starts at byte 8 — 56 LEDs per report
+### CONFIRMED: the LED data starts at byte 4 — 60 LEDs, whole diamond
 
-`probe.py experiment led0`, 2026-07-29. With every other data byte zeroed,
-setting **byte 8 alone lit a single region at the start of the strip**.
+`probe.py experiment headerleds`, 2026-07-29. Each of bytes 1..7 set alone to
+full brightness with every other byte zeroed:
 
-Byte 8 is LED 0, not a header byte. It had been pinned at `0x06` — about 2%
-brightness — on every write made across several sessions, which beside
-full-brightness neighbours read as a dead LED and sent two experiments chasing
-segment masks that do not exist.
+| Byte | Result |
+|---|---|
+| 1 | nothing lights |
+| 2 | nothing lights |
+| 3 | nothing lights (status echoes its low nibble — see below) |
+| **4** | one LED, bottom-left segment, middle |
+| **5** | one LED, slightly right of it |
+| **6** | one LED, further right |
+| **7** | one LED, further right again |
 
-Corrected layout:
+Bytes 4..7 each light one LED, stepping along the strip. Then `0xff` across
+**bytes 1..63** lit the diamond **completely white with no gaps** — the
+confirmation that 60 LEDs is the entire strip.
+
+Final layout:
 
 ```
 byte  0      opcode: 05 red plane, 06 green, 07 blue, 0d blank all
-bytes 1..7   00 00 d0 00 00 00 0f     header
-bytes 8..63  56 intensity bytes, one per LED, for the selected plane
+bytes 1..2   00 00        header
+byte  3      d0           header; low nibble echoed in the reply status
+bytes 4..63  60 intensity bytes, one per LED, for the selected plane
 ```
 
-`DATA_FIRST = 8`, `LED_COUNT = 56` in `omenled/protocol.py`.
+`DATA_FIRST = 4`, `LED_COUNT = 60`.
 
-**Caveat on one trial.** The second `led0` trial asked "is that one LED dark
-again? (yes/no)" rather than asking for a description, so its answer cannot
-distinguish "the same gap" from "one additional gap". A question that
-presupposes its answer collects no evidence. The conclusion rests on trial
-three, which was unambiguous.
+### Why this took four attempts, and the lesson
 
-### 56 LEDs is the full reach of this report
+The data offset was read as 9, then 8, then 4. Every wrong reading came from the
+same mistake: **a byte held at a constant is indistinguishable from a byte with
+no effect.** Bytes 4..7 were inherited from an old probe packet as
+`00 00 00 0f` and never varied, so every experiment concluded they were inert
+header — while they were in fact LEDs 0..3, pinned dark and dim.
 
-`probe.py experiment offset`, 2026-07-29. A single lit LED, with bytes 2 and 3
-varied. **Every trial returned "the same"** — the lit LED did not move for
-`byte2 = 01`, `byte2 = 08`, `byte3 = 00` or `byte3 = d1`.
+Those constants were the visible faults reported from the panel: LEDs 0..2 held
+at `0x00` were the permanently dark spot, and LED 3 held at `0x0f` was the dim
+patch that never took a colour.
 
-Everything that could plausibly offset or page the write is now excluded:
-
-| Byte | Verdict |
-|---|---|
-| 1 (chunk) | ignored — writing chunk 1 gave an identical result |
-| 2 | no effect |
-| 3 | no effect on output (but see the status tag below) |
-| 7 | no effect at `0f`, `3f` or `ff` |
-
-So this report shape addresses exactly 56 LEDs, and one LED beside LED 0
-remains dark. Either it belongs to a report we have not found, or it is a
-hardware fault — which the monitor's own OSD effects would settle in seconds.
-
-### Open: are bytes 1..7 header, or LEDs we have been pinning?
-
-Reported 2026-07-29, dividing the diamond into four segments: in the
-**bottom-left** segment the centre LED is permanently off, and the right part is
-permanently **white**, whatever colour is filled.
-
-In every frame sent, byte 3 is `0xd0` in all three planes — `(208,208,208)`,
-white — and bytes 4..6 are `0x00` in all three, off. If bytes 1..7 are LED data
-rather than a header, that is not a coincidence but a complete explanation of
-both faults, and the strip would be 63 LEDs starting at byte 1.
-
-Against it: byte 3's low nibble appears in the reply status (below), which is
-header-like behaviour.
-
-`probe.py experiment headerleds` decides it by setting each of bytes 1..7 alone
-to full brightness with every other byte zeroed. A byte that lights an LED is
-pixel data.
-
-Note this is the *third* time an offset assumption has been wrong in the same
-direction — 9, then 8, now possibly 1 — each time because a byte held at a fixed
-value is indistinguishable from a byte with no effect. Held-constant bytes are
-not evidence of anything.
+The fix that finally worked was not a cleverer sweep but a different question —
+"set this byte alone and tell me if *anything* lights" — plus a description of
+what the wrong pixels physically looked like. Ruling a byte inert requires
+varying it against a background where its effect would be visible; nothing else
+counts as evidence.
 
 ### Reply byte 3 carries a request tag
 
@@ -475,14 +455,14 @@ Every `0x01` packet sent so far — varying marker, mode, effect and RGB — cha
 the lighting in no observable way, while `0x05` and `0x0d` both did. `0x01` is
 accepted (it echoes) but its effect, if any, is not visual.
 
-## Open questions, in the order they block progress
+## Open questions
 
-1. Does `experiment confirm` reproduce predicted output? Until it does, the
-   layout above is a model that explains past observations, not knowledge.
-2. Do plane writes stack, or does each replace the frame? Decides whether
-   per-LED RGB is possible in one frame.
-3. How many LEDs are there in total, and does byte 1 address the rest?
-4. Which LED index maps to which physical position? (`omenled.cli chase`)
-5. What hands control back to the OSD? Still unknown; USB replug or a monitor
-   reset are the only known clears.
-6. Is there a brightness control separate from scaling the intensities?
+The write path is complete: 60 LEDs, full RGB each, whole diamond addressable.
+What remains is refinement.
+
+1. Which LED index maps to which physical position? (`omenled.cli chase`)
+   Needed before named zones like `--zone bottom-left` are possible.
+2. What hands control back to the OSD? Still unknown after nine candidates.
+   USB replug or a monitor reset are the only known clears.
+3. Is there a brightness control separate from scaling the intensities?
+4. Do any other opcodes do anything? `experiment opcodes` has never been run.

@@ -24,7 +24,7 @@ class TestPlanePacket:
 
     def test_carries_the_header_the_device_accepted(self):
         packet = protocol.plane_packet(protocol.PLANE_RED, [])
-        assert packet[:8] == bytes([0x05, 0x00, 0x00, 0xD0, 0x00, 0x00, 0x00, 0x0F])
+        assert packet[:4] == bytes([0x05, 0x00, 0x00, 0xD0])
 
     def test_intensities_begin_at_the_first_data_byte(self):
         packet = protocol.plane_packet(protocol.PLANE_GREEN, [0x11, 0x22])
@@ -55,7 +55,7 @@ class TestPlanePacket:
             protocol.plane_packet(protocol.PLANE_RED, [256])
 
     def test_the_led_count_matches_the_report_geometry(self):
-        assert protocol.LED_COUNT == 64 - protocol.DATA_FIRST == 56
+        assert protocol.LED_COUNT == 64 - protocol.DATA_FIRST == 60
 
 
 class TestFramePackets:
@@ -120,7 +120,7 @@ class TestGradient:
         assert ramp[-1] == (255, 0, 0)
 
     def test_length_matches_the_request(self):
-        assert len(protocol.gradient((0, 0, 0), (1, 1, 1), 56)) == 56
+        assert len(protocol.gradient((0, 0, 0), (1, 1, 1), 60)) == 60
 
     def test_a_single_step_is_the_start_colour(self):
         assert protocol.gradient((9, 9, 9), (1, 1, 1), 1) == [(9, 9, 9)]

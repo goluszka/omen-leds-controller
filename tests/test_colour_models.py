@@ -309,10 +309,9 @@ class TestLitBuffer:
 
     def test_the_header_keeps_its_baseline_values(self):
         out = probe._lit()
+        # Bytes 0..3 are the whole header; byte 4 onward is pixel data.
         assert out[:4] == bytes([0x05, 0x00, 0x00, 0xD0])
-        # Byte 7 ends the header; byte 8 is LED 0 and carries pixel data.
-        assert out[7] == 0x0F
-        assert out[8] == 0xFF
+        assert out[4] == 0xFF
 
     def test_the_opcode_is_selectable(self):
         assert probe._lit(opcode=0x06)[0] == 0x06
@@ -406,7 +405,6 @@ class TestFrameHeaderOverrides:
     def test_without_overrides_the_header_is_untouched(self):
         pkt = probe._frame()[0]
         assert pkt[:4] == bytes([0x05, 0x00, 0x00, 0xD0])
-        assert pkt[7] == 0x0F
 
     def test_the_chunk_index_reaches_byte_1(self):
         assert all(pkt[1] == 1 for pkt in probe._frame(chunk=1))
@@ -613,9 +611,10 @@ class TestVerdictHeaderLeds:
         assert "61 LEDs" in text
         assert "DATA_FIRST = 3" in text
 
-    def test_the_white_spot_is_explained_when_bytes_are_pixels(self):
-        text = probe.verdict_headerleds({"byte3": "the white area lights"})
-        assert "208,208,208" in text
+    def test_pinned_constants_are_named_as_the_cause(self):
+        text = probe.verdict_headerleds({"byte4": "an led lights"})
+        assert "pinned them to" in text
+        assert "cannot be told apart" in text
 
     def test_nothing_lighting_keeps_the_current_offset(self):
         text = probe.verdict_headerleds({f"byte{n}": "no" for n in range(1, 8)})

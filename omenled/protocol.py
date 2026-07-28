@@ -215,17 +215,24 @@ OP_OFF = 0x0D
 
 PLANES = (PLANE_RED, PLANE_GREEN, PLANE_BLUE)
 
-# Byte 8 is LED 0, not a header byte: with every other data byte zeroed, setting
-# byte 8 alone lit a single region at the start of the strip. It had been pinned
-# at 0x06 — about 2% brightness — on every earlier write, which is why it read
-# as a dead LED for several sessions.
-DATA_FIRST = 8
-LED_COUNT = REPORT_SIZE - DATA_FIRST  # 56 per report
+# The LED data starts at byte 4, established 2026-07-29 by setting each of
+# bytes 1..7 alone to full brightness with everything else zeroed: bytes 1, 2
+# and 3 lit nothing, bytes 4, 5, 6 and 7 each lit one LED, stepping along the
+# strip. A write of 0xff across bytes 1..63 then lit the whole diamond with no
+# gaps, which is the confirmation that 60 LEDs is the complete strip.
+#
+# The offset was wrong three times before this — assumed 9, then 8, then tested
+# properly. Each earlier reading treated bytes as header because they had been
+# pinned to constants inherited from an old probe packet, and a byte held at a
+# constant is indistinguishable from a byte with no effect. Those constants
+# caused the visible faults: bytes 4..6 at 0x00 left LEDs 0..2 permanently dark,
+# and byte 7 at 0x0f left LED 3 stuck at a dim grey that never took a colour.
+DATA_FIRST = 4
+LED_COUNT = REPORT_SIZE - DATA_FIRST  # 60
 
-# Header bytes 1..7, held at these values throughout every successful write.
-# None has an established meaning; they are preserved rather than zeroed because
-# they are what the device has always been sent and has always accepted.
-HEADER_TAIL = (0x00, 0x00, 0xD0, 0x00, 0x00, 0x00, 0x0F)
+# Header bytes 1..3. Byte 3's low nibble is echoed in the reply status, so it
+# doubles as a request tag; 0xd0 is what the device has always been sent.
+HEADER_TAIL = (0x00, 0x00, 0xD0)
 
 
 def plane_packet(plane: int, intensities: Sequence[int], chunk: int = 0) -> bytes:
