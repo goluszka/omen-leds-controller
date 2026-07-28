@@ -736,7 +736,102 @@ def verdict_animation(answers: Dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+FILL = 0xFF
+
+
+def _fill(base: bytes, lo: int, hi: int, value: int = FILL) -> bytes:
+    """Copy of `base` with the inclusive range [lo, hi] set to `value`."""
+    out = bytearray(base)
+    for i in range(lo, hi + 1):
+        out[i] = value
+    return bytes(out)
+
+
+def _differs(link, journal, blank: bytes, payload: bytes, label: str,
+             timeout: int) -> bool:
+    for pkt in (blank, payload):
+        link.exchange(pkt, timeout_ms=timeout, label=label)
+    answer = ask("same as the reference, or different? (same/different)")
+    journal.observation(answer, label=label)
+    return bool(re.search(r"\b(diff\w*|inn\w*|zmien\w*)\b", answer.lower()))
+
+
+def exp_bisect(link, journal, timeout: int) -> Dict[str, str]:
+    """Which byte of the packet does opcode 0x05 actually read?
+
+    We have been varying 11 bytes of a 64-byte report and seeing no response.
+    Bytes 11..63 have never been touched. Rather than sweep 53 bytes one at a
+    time, this fills whole ranges and narrows by halves, so locating a single
+    responsive byte costs about six observations instead of fifty.
+
+    The first trial is the valuable one: it sets every byte but the opcode, so
+    if the result is unchanged then the device ignores the entire packet body
+    and 0x05 is nothing more than "on" — which we learn for one observation.
+    """
+    base = protocol.build_probe(opcode=OP_SET)
+    blank = protocol.build_probe(opcode=OP_BLANK)
+    answers: Dict[str, str] = {}
+
+    print("\nEstablishing the reference. Blanking, then sending the base packet.")
+    for pkt in (blank, base):
+        link.exchange(pkt, timeout_ms=timeout, label="bisect:reference")
+    reference = ask("Describe exactly what is lit — this is the reference")
+    journal.observation(reference, label="bisect:reference")
+    answers["reference"] = reference
+
+    print("\nTrial 1: setting every byte except the opcode to ff.")
+    print("If this looks identical to the reference, the device is ignoring")
+    print("the whole packet body.\n")
+    if not _differs(link, journal, blank, _fill(base, 1, 63), "bisect:all", timeout):
+        answers["responsive"] = "none"
+        return answers
+
+    lo, hi = 1, 63
+    while lo < hi:
+        mid = (lo + hi) // 2
+        print(f"\nNarrowing: bytes {lo}..{mid} set to ff (of {lo}..{hi})")
+        if _differs(link, journal, blank, _fill(base, lo, mid),
+                    f"bisect:{lo}-{mid}", timeout):
+            hi = mid
+        else:
+            lo = mid + 1
+    answers["responsive"] = str(lo)
+    return answers
+
+
+def verdict_bisect(answers: Dict[str, str]) -> str:
+    responsive = answers.get("responsive")
+    reference = answers.get("reference", "(not recorded)")
+
+    if responsive == "none":
+        return (
+            f"reference: {reference}\n\n"
+            "Setting all 63 payload bytes to ff changed nothing.\n\n"
+            "The device ignores the entire packet body under opcode 0x05, which\n"
+            "means 0x05 is simply 'lighting on' and carries no parameters at all.\n"
+            "Colour and zone must therefore be selected by a different opcode.\n\n"
+            "Next: `experiment opcodes` to find which other byte-0 values do\n"
+            "anything. The pair we have, 05/0d, is an on/off switch and nothing\n"
+            "more."
+        )
+    if responsive is None:
+        return "Bisection did not complete. The journal holds the answers so far."
+    offset = int(responsive)
+    guess = protocol.HYPOTHESIS.get(offset, "not in the current hypothesis")
+    return (
+        f"reference: {reference}\n\n"
+        f"Byte {offset} changes the output under opcode 0x05.  ({guess})\n\n"
+        "This is the first byte shown to matter. Confirm it is real before\n"
+        "building on it: predict what a specific value will do, then send it.\n"
+        f"  probe.py sweep --byte {offset} --values 0x00:0x0f --observe\n\n"
+        "Note the bisection finds ONE responsive byte. If several matter, the\n"
+        "others are still hidden — re-run after pinning this one down."
+    )
+
+
 EXPERIMENTS = {
+    "bisect": (exp_bisect, verdict_bisect,
+               "which byte of the 64 does opcode 05 actually read?"),
     "animation": (exp_animation, verdict_animation,
                   "is an effect running that repaints over everything we write?"),
     "commit": (exp_commit, verdict_commit,

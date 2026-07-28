@@ -139,7 +139,7 @@ deal.
 
 **Test:** send `02`, then `00`, then read. If the reply echoes `02`, confirmed.
 
-### Suspected observation contamination — read before trusting anything below
+### Observation contamination — ruled out
 
 Session of 2026-07-29 ran `experiment colour` and `experiment zones`. Combined
 result, 13 trials:
@@ -153,23 +153,24 @@ The lighting was **red in all 13 trials, including with colour bytes all zero**,
 and never went dark. Only the size and position of the lit region drifted, by
 small amounts, in no relation to what was sent.
 
-A field that ignores its input and drifts on its own is not a field. The reading
-that fits every observation is that **an animated effect is running on the
-monitor** and repainting over anything written, so each answer is a snapshot of
-the effect rather than a response to a packet.
+The suspected explanation was a running animation repainting over our writes,
+which would have made every answer a snapshot of the effect rather than a
+response to a packet.
 
-If that holds, it also reframes the two opcodes below: `0x05` would be *lighting
-on*, restoring the monitor's own configured effect, rather than *set a segment*.
+**`probe.py experiment animation`, session `20260729-000931`, refutes it.** With
+no packets sent, the lighting did not move over 15 seconds; after `0x05` it did
+not change over a further 10 seconds; `0x0d` blanked it and it stayed blank.
+The lighting is static and observations are attributable.
 
-`probe.py experiment animation` decides this. Until it does, treat every
-HYPOTHESIS in this document as provisional, and note that a static, non-red OSD
-colour is a precondition for any further visual decoding — otherwise our writes
-are indistinguishable from the monitor's own state.
+So the results stand, and they say something sharper than contamination would
+have: **offsets 4–6 and byte 1 genuinely have no effect under `0x05`.** The
+small drifts in described size and position across trials were descriptive
+noise, not movement.
 
-**Process note for the next session:** the animation question was raised before
-this batch and the batch went ahead without settling it. Validate the
-observation channel before spending observations through it; a human observer is
-the scarcest resource here and 13 trials were spent producing no information.
+**Process note:** the animation question was raised before that batch and the
+batch went ahead without settling it. It cost 13 observations that could not be
+interpreted until the control ran. Validate the observation channel *before*
+spending observations through it.
 
 ### Offsets 4–6 are not a plain RGB triple
 

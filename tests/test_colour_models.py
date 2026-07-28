@@ -6,6 +6,7 @@ model alive or discard the right one.
 """
 
 import os
+import re
 import sys
 
 import pytest
@@ -181,3 +182,59 @@ class TestVerdictAnimation:
     def test_self_restoring_lighting_is_called_out(self):
         text = probe.verdict_animation({"idle_moves": "no", "off_persists": "came back"})
         assert "temporary" in text
+
+
+class TestFill:
+    def test_sets_an_inclusive_range(self):
+        out = probe._fill(bytes(64), 4, 6)
+        assert out[3] == 0x00
+        assert out[4:7] == b"\xff\xff\xff"
+        assert out[7] == 0x00
+
+    def test_leaves_the_opcode_alone_when_the_range_starts_at_one(self):
+        base = probe.protocol.build_probe(opcode=0x05)
+        assert probe._fill(base, 1, 63)[0] == 0x05
+
+    def test_a_single_byte_range_touches_one_byte(self):
+        assert probe._fill(bytes(64), 9, 9)[9] == 0xFF
+        assert probe._fill(bytes(64), 9, 9)[8] == 0x00
+
+    def test_does_not_mutate_the_input(self):
+        base = bytes(64)
+        probe._fill(base, 0, 63)
+        assert base == bytes(64)
+
+
+class TestVerdictBisect:
+    def test_an_ignored_body_is_reported_as_an_on_off_switch(self):
+        text = probe.verdict_bisect({"reference": "bottom left red", "responsive": "none"})
+        assert "ignores the entire packet body" in text
+        assert "on/off switch" in text
+
+    def test_a_responsive_byte_is_named_with_its_hypothesis(self):
+        text = probe.verdict_bisect({"reference": "x", "responsive": "7"})
+        assert "Byte 7" in text
+        assert "brightness" in text
+
+    def test_a_byte_outside_the_hypothesis_is_still_reported(self):
+        text = probe.verdict_bisect({"reference": "x", "responsive": "40"})
+        assert "Byte 40" in text
+        assert "not in the current hypothesis" in text
+
+    def test_it_asks_for_confirmation_rather_than_declaring_the_field_solved(self):
+        text = probe.verdict_bisect({"reference": "x", "responsive": "12"})
+        assert "predict" in text
+        assert "If several matter" in text
+
+    def test_an_incomplete_run_says_so(self):
+        assert "did not complete" in probe.verdict_bisect({"reference": "x"})
+
+
+class TestDiffersDetection:
+    @pytest.mark.parametrize("answer", ["different", "differs", "inne", "zmieniło się"])
+    def test_change_words_are_recognised(self, answer):
+        assert re.search(r"\b(diff\w*|inn\w*|zmien\w*)\b", answer.lower())
+
+    @pytest.mark.parametrize("answer", ["same", "identical", "no change"])
+    def test_sameness_is_not_read_as_change(self, answer):
+        assert not re.search(r"\b(diff\w*|inn\w*|zmien\w*)\b", answer.lower())
