@@ -282,6 +282,29 @@ So this report shape addresses exactly 56 LEDs, and one LED beside LED 0
 remains dark. Either it belongs to a report we have not found, or it is a
 hardware fault — which the monitor's own OSD effects would settle in seconds.
 
+### Open: are bytes 1..7 header, or LEDs we have been pinning?
+
+Reported 2026-07-29, dividing the diamond into four segments: in the
+**bottom-left** segment the centre LED is permanently off, and the right part is
+permanently **white**, whatever colour is filled.
+
+In every frame sent, byte 3 is `0xd0` in all three planes — `(208,208,208)`,
+white — and bytes 4..6 are `0x00` in all three, off. If bytes 1..7 are LED data
+rather than a header, that is not a coincidence but a complete explanation of
+both faults, and the strip would be 63 LEDs starting at byte 1.
+
+Against it: byte 3's low nibble appears in the reply status (below), which is
+header-like behaviour.
+
+`probe.py experiment headerleds` decides it by setting each of bytes 1..7 alone
+to full brightness with every other byte zeroed. A byte that lights an LED is
+pixel data.
+
+Note this is the *third* time an offset assumption has been wrong in the same
+direction — 9, then 8, now possibly 1 — each time because a byte held at a fixed
+value is indistinguishable from a byte with no effect. Held-constant bytes are
+not evidence of anything.
+
 ### Reply byte 3 carries a request tag
 
 Sending byte 3 = `0xd1` instead of `0xd0` changed the reply status from `0x80`

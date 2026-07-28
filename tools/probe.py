@@ -1498,7 +1498,99 @@ def verdict_offset(answers: Dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def exp_headerleds(link, journal, timeout: int) -> Dict[str, str]:
+    """Are bytes 1..7 header, or are they LEDs we have been pinning?
+
+    In every frame we send, byte 3 is 0xd0 in all three planes — (208,208,208),
+    white — and bytes 4..6 are 0x00 in all three, off. The reported faults are a
+    permanently white spot and a permanently dark one, adjacent, at the start of
+    the strip. If bytes 1..7 are LED data rather than a header, that is not a
+    coincidence but a complete explanation.
+
+    Against it: byte 3's low nibble appears in the reply status, which is
+    header-like. So each byte is tested directly — set alone to full brightness
+    with every other byte zero. A byte that lights something is a pixel.
+    """
+    blank = protocol.build_probe(opcode=OP_BLANK)
+    answers: Dict[str, str] = {}
+
+    def only(offset: int, value: int = 0xFF) -> List[bytes]:
+        return [
+            protocol.with_byte(bytes([plane]) + bytes(63), offset, value)
+            for plane in protocol.PLANES
+        ]
+
+    print("Each trial lights ONE byte and zeroes every other byte in the report.")
+    print("If that byte is a pixel, exactly one LED lights.\n")
+
+    for offset in range(1, 8):
+        print(f"byte {offset} = ff, everything else 0")
+        answers[f"byte{offset}"] = _step(
+            link, journal, f"hdrled:byte{offset}", [blank] + only(offset),
+            "does anything light? (no / where?)", timeout)
+
+    print("\nfinally: every byte 1..63 at full brightness")
+    all_on = [bytes([plane]) + bytes([0xFF] * 63) for plane in protocol.PLANES]
+    answers["all 1..63"] = _step(
+        link, journal, "hdrled:all", [blank] + all_on,
+        "is the diamond completely white with no gaps? (yes / describe)", timeout)
+    return answers
+
+
+def verdict_headerleds(answers: Dict[str, str]) -> str:
+    lines = ["trials:", ""]
+    for key, answer in answers.items():
+        lines.append(f"  {key:12} {answer}")
+    lines.append("")
+
+    def lit(key: str) -> bool:
+        value = answers.get(key, "").strip().lower()
+        if not value or SAME_RE.search(value) or re.search(r"\b(no|nie|nothing)\b", value):
+            return False
+        return True
+
+    pixels = [n for n in range(1, 8) if lit(f"byte{n}")]
+
+    if pixels:
+        first = min(pixels)
+        lines += [
+            f"Bytes {', '.join(str(p) for p in pixels)} light LEDs — they are "
+            "pixel data, not header.",
+            "",
+            f"The data therefore starts at byte {first}, giving "
+            f"{protocol.REPORT_SIZE - first} LEDs.",
+            "",
+            "That explains both faults directly: byte 3 has been 0xd0 in all",
+            "three planes on every frame, which is (208,208,208) — the",
+            "permanently white spot — and bytes 4..6 have been 0x00 in all",
+            "three, the permanently dark one.",
+            "",
+            f"Fix: DATA_FIRST = {first} in omenled/protocol.py, and shorten",
+            "HEADER_TAIL to match.",
+        ]
+    else:
+        lines += [
+            "None of bytes 1..7 lights anything on its own, so they are header",
+            "after all and the data does start at byte 8.",
+            "",
+            "The white and dark spots then belong to LEDs this report cannot",
+            "reach, and every addressing mechanism tried — bytes 1, 2, 3, 7 and",
+            "the chunk index — has been excluded. What is left is an opcode or",
+            "report shape we have not found.",
+            "",
+            "`experiment opcodes` has never been run and would census byte 0",
+            "across 0x00-0x10. That is the last cheap avenue.",
+        ]
+
+    final = answers.get("all 1..63", "")
+    if final and not re.search(r"\b(except|but|gap|missing|opr[oó]cz)\b", final.lower()):
+        lines += ["", f"Full-brightness write: {final}"]
+    return "\n".join(lines)
+
+
 EXPERIMENTS = {
+    "headerleds": (exp_headerleds, verdict_headerleds,
+                   "are bytes 1..7 header, or LEDs we have been pinning?"),
     "offset": (exp_offset, verdict_offset,
                "can we reach the LED past the end of the report?"),
     "led0": (exp_led0, verdict_led0,

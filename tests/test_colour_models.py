@@ -600,3 +600,44 @@ class TestNumberedPositions:
     def test_a_same_marker_still_wins_over_numbers(self):
         # "the same" is decisive whatever else the sentence contains.
         assert not probe.reports_change("the same, led 9", "led 1")
+
+
+class TestVerdictHeaderLeds:
+    def test_lit_bytes_are_reported_as_pixels_and_set_the_offset(self):
+        text = probe.verdict_headerleds(
+            {"byte3": "yes, the white spot lights", "byte4": "one led lit",
+             "byte1": "no", "byte2": "no"}
+        )
+        assert "pixel data, not header" in text
+        assert "starts at byte 3" in text
+        assert "61 LEDs" in text
+        assert "DATA_FIRST = 3" in text
+
+    def test_the_white_spot_is_explained_when_bytes_are_pixels(self):
+        text = probe.verdict_headerleds({"byte3": "the white area lights"})
+        assert "208,208,208" in text
+
+    def test_nothing_lighting_keeps_the_current_offset(self):
+        text = probe.verdict_headerleds({f"byte{n}": "no" for n in range(1, 8)})
+        assert "they are header" in text
+        assert "start at byte 8" in text
+
+    def test_a_dead_end_names_the_last_avenue(self):
+        text = probe.verdict_headerleds({f"byte{n}": "no" for n in range(1, 8)})
+        assert "experiment opcodes" in text
+
+    def test_same_answers_do_not_count_as_lit(self):
+        text = probe.verdict_headerleds({"byte3": "no change", "byte4": "nothing"})
+        assert "they are header" in text
+
+    def test_a_gapless_full_write_is_surfaced(self):
+        text = probe.verdict_headerleds(
+            {"byte3": "no", "all 1..63": "yes completely white"}
+        )
+        assert "Full-brightness write" in text
+
+    def test_a_gapped_full_write_is_not_presented_as_success(self):
+        text = probe.verdict_headerleds(
+            {"byte3": "no", "all 1..63": "whole diamond except one led"}
+        )
+        assert "Full-brightness write" not in text
