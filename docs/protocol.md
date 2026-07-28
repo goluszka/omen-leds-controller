@@ -7,7 +7,7 @@ Evidence ledger. Every entry is tagged:
 - **HYPOTHESIS** — consistent with what we have seen, not yet predictive.
 - **REFUTED** — tested, found false. Kept so it is not retried.
 
-Last updated: 2026-07-28, after session `20260728-234835`.
+Last updated: 2026-07-29, after the colour and zones sessions.
 
 ## CONFIRMED
 
@@ -83,23 +83,33 @@ signature, and nothing more.
 oracle. The design's step-2 go/no-go fails here, so the decode falls entirely to
 visual bisection with a human observer. Plan effort accordingly.
 
-### `0x0d` blanks the lighting; `0x05` lights one segment
+### `0x0d` blanks the lighting
 
-`probe.py experiment commit`, session of 2026-07-28. Three trials:
+`probe.py experiment commit`, 2026-07-28, plus 13 further uses as the blanking
+step of later experiments:
 
 | Packet | Result |
 |---|---|
 | `0d 00 00 d0 ff 00 00 0f 06 00 03` | all off |
 | `0d 00 00 d0 00 ff 00 0f 06 00 03` | all off |
 | `01 …0000ff…` then `0d …000000…` | all off |
-| `05 00 00 d0 ff ff ff 0f 06 00 03` | **bottom-left segment lit red**, rest off |
 
 `0x0d` blanks regardless of what offsets 4–6 contain, so it is an **off**
 command, not the commit half of a stage/commit pair. The staging hypothesis is
 refuted: blue staged with `0x01` did not survive a black `0x0d`.
 
-`0x05` lights exactly one segment while leaving the rest dark, so it addresses a
-single element rather than the whole strip.
+This one is safe from the contamination described below — an animation cannot
+explain the lighting going *dark* on command, and it did so every time.
+
+### `0x05` turns the lighting on
+
+`05 00 00 d0 ff ff ff 0f 06 00 03` lights the panel after a `0x0d` blank, in
+every trial.
+
+**What it lights is not established.** It was previously recorded here as
+"lights one segment", which assumed the bottom-left red region was our packet's
+doing. See the contamination note below: if an effect is running, `0x05` is
+simply *on*, and the region we saw belongs to the monitor, not to us.
 
 ### Reply byte 0 echoes an opcode
 
