@@ -1,0 +1,12 @@
+# Metadata lives in setup.cfg rather than a [project] table here.
+#
+# PEP 621 metadata needs setuptools >= 61, and the Python this is developed
+# against ships 58 — a [project] table would make the package uninstallable on
+# the very machine it controls. setup.cfg is understood by both.
+
+[build-system]
+requires = ["setuptools>=45"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

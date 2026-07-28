@@ -74,8 +74,7 @@ class TestState:
 
 
 @pytest.fixture
-def lights(fake_hid, tmp_path, monkeypatch):  # noqa: F811
-    monkeypatch.setattr(state, "DEFAULT_PATH", str(tmp_path / "state.json"))
+def lights(fake_hid, tmp_path):  # noqa: F811
     journal = Journal(session="t", directory=str(tmp_path))
     link = transport.Transport(journal, min_interval=0).open()
     yield device.Lighting(link), fake_hid

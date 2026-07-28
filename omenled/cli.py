@@ -23,7 +23,7 @@ import time
 from typing import List, Optional
 
 from . import protocol, state
-from .device import Lighting, RenderRejected, connect
+from .device import Lighting, RenderRejected, open_lighting
 from .transport import DeviceNotFound, TransportError
 
 
@@ -161,20 +161,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        journal, transport, lights = connect()
+        with open_lighting() as lights:
+            return args.func(lights, args)
     except DeviceNotFound as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    try:
-        return args.func(lights, args)
     except (TransportError, RenderRejected, ValueError, IndexError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
         return 130
-    finally:
-        transport.close()
-        journal.close()
 
 
 if __name__ == "__main__":

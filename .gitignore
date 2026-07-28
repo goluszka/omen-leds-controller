@@ -3,3 +3,7 @@ __pycache__/
 .venv/
 data/sessions/*.jsonl
 data/state.json
+*.egg-info/
+build/
+dist/
+.pytest_cache/

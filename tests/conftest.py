@@ -17,7 +17,12 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 
 @pytest.fixture(autouse=True)
-def isolate_state(tmp_path, monkeypatch):
-    from omenled import state
+def isolate_data_dir(tmp_path, monkeypatch):
+    """Redirect saved state and journals away from the real user directory.
 
-    monkeypatch.setattr(state, "DEFAULT_PATH", str(tmp_path / "state.json"))
+    Uses OMENLED_DATA_DIR rather than patching module attributes, so the tests
+    exercise the same override mechanism callers have.
+    """
+    from omenled import paths
+
+    monkeypatch.setenv(paths.ENV_VAR, str(tmp_path / "omenled-data"))

@@ -16,13 +16,11 @@ from typing import List, Optional, Tuple
 
 Pixel = Tuple[int, int, int]
 
-DEFAULT_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "state.json"
-)
+from . import paths
 
 
 def save(pixels: List[Pixel], brightness: int, path: Optional[str] = None) -> None:
-    path = path or DEFAULT_PATH
+    path = path or paths.state_file()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         json.dump({"pixels": [list(p) for p in pixels], "brightness": brightness}, fh)
@@ -39,7 +37,7 @@ def load(path: Optional[str] = None) -> Optional[Tuple[List[Pixel], int]]:
     impossible to redirect, which had tests writing to the real state file and
     reading each other's leftovers.
     """
-    path = path or DEFAULT_PATH
+    path = path or paths.state_file()
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)

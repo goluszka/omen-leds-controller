@@ -28,7 +28,12 @@ import sys
 import time
 from typing import Dict, List, Optional
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _REPO)
+
+# The workbench's journals belong with the repository: they are the evidence
+# behind docs/protocol.md, not the user's data.
+os.environ.setdefault("OMENLED_DATA_DIR", os.path.join(_REPO, "data"))
 
 from omenled import protocol, safety, transport
 from omenled.journal import Journal, hexs, read_session, unhex

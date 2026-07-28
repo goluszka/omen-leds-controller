@@ -8,10 +8,11 @@ currently displayed, and a render always writes every LED.
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence, Tuple
+from contextlib import contextmanager
+from typing import Iterator, List, Optional, Sequence, Tuple, Union
 
 from . import protocol
-from .journal import Journal
+from .journal import Journal, NullJournal
 from .transport import Transport
 
 Pixel = Tuple[int, int, int]
@@ -97,12 +98,36 @@ class Lighting:
         pass
 
 
-def connect(session: Optional[str] = None) -> Tuple[Journal, Transport, Lighting]:
-    """Open the device and return everything needed to drive it.
+@contextmanager
+def open_lighting(journal: Union[bool, Journal, NullJournal] = False,
+                  session: Optional[str] = None) -> Iterator[Lighting]:
+    """Open the monitor's lighting for the duration of a `with` block.
 
-    The journal is returned rather than hidden so callers can close it; every
-    packet a Lighting sends is logged through it either way.
+        with open_lighting() as lights:
+            lights.fill((0, 255, 0)).render()
+
+    Journalling is off by default. Logging every packet to disk is right for
+    reverse engineering and wrong for a library someone depends on, where
+    unexpected file writes are a defect. Pass `journal=True` to record a session
+    under the user data directory, or supply your own Journal.
+
+    The lighting is left as rendered when the block exits — a lighting tool that
+    blanked the panel on exit would be useless. Call `off()` explicitly.
     """
+    log = Journal(session=session) if journal is True else (
+        journal if journal else NullJournal())
+    transport = Transport(log)
+    try:
+        transport.open()
+        yield Lighting(transport)
+    finally:
+        transport.close()
+        log.close()
+
+
+def connect(session: Optional[str] = None) -> Tuple[Journal, Transport, Lighting]:
+    """Open the device and return its parts, for callers managing their own
+    lifetimes. Prefer `open_lighting`."""
     journal = Journal(session=session)
     transport = Transport(journal).open()
     return journal, transport, Lighting(transport)

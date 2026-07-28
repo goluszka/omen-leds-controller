@@ -13,9 +13,7 @@ import os
 import time
 from typing import Any, Dict, Iterator, List, Optional
 
-DEFAULT_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "sessions"
-)
+from . import paths
 
 
 def hexs(data: bytes) -> str:
@@ -33,8 +31,9 @@ class Journal:
     cables and killed processes, and a buffered record is a lost one.
     """
 
-    def __init__(self, session: Optional[str] = None, directory: str = DEFAULT_DIR):
+    def __init__(self, session: Optional[str] = None, directory: Optional[str] = None):
         self.session = session or time.strftime("%Y%m%d-%H%M%S")
+        directory = directory or paths.sessions_dir()
         self.directory = directory
         os.makedirs(directory, exist_ok=True)
         self.path = os.path.join(directory, f"{self.session}.jsonl")
@@ -81,12 +80,49 @@ class Journal:
         self.close()
 
 
+class NullJournal:
+    """Journal interface that records nothing.
+
+    The default for library use. Every packet being logged to disk is right for
+    reverse engineering and wrong for a dependency someone drops into their own
+    project, where surprise file writes are a defect.
+    """
+
+    session = "null"
+    path = os.devnull
+
+    def record(self, kind: str, **fields: Any) -> Dict[str, Any]:
+        return {}
+
+    def tx(self, payload: bytes, label: Optional[str] = None) -> Dict[str, Any]:
+        return {}
+
+    def rx(self, payload: Optional[bytes], label: Optional[str] = None) -> Dict[str, Any]:
+        return {}
+
+    def note(self, text: str, label: Optional[str] = None) -> Dict[str, Any]:
+        return {}
+
+    def observation(self, text: str, label: Optional[str] = None) -> Dict[str, Any]:
+        return {}
+
+    def close(self) -> None:
+        pass
+
+    def __enter__(self) -> "NullJournal":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        pass
+
+
 def read_session(path: str) -> List[Dict[str, Any]]:
     with open(path, encoding="utf-8") as fh:
         return [json.loads(line) for line in fh if line.strip()]
 
 
-def iter_sessions(directory: str = DEFAULT_DIR) -> Iterator[str]:
+def iter_sessions(directory: Optional[str] = None) -> Iterator[str]:
+    directory = directory or paths.sessions_dir()
     if not os.path.isdir(directory):
         return
     for name in sorted(os.listdir(directory)):
