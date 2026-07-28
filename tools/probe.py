@@ -447,11 +447,162 @@ def verdict_opcodes(answers: Dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+# Established 2026-07-28: 0x05 lights a segment, 0x0d blanks everything.
+OP_SET = 0x05
+OP_BLANK = 0x0D
+
+
+def name_rgb(r: int, g: int, b: int) -> str:
+    """The colour name a human would give an (r, g, b) triple.
+
+    Only the unmistakable cases are named. Anything else returns "other" and is
+    excluded from model comparison rather than forced into a bucket.
+    """
+    high = [c >= 0x80 for c in (r, g, b)]
+    if not any(high):
+        return "off"
+    if all(high):
+        return "white"
+    if high == [True, False, False]:
+        return "red"
+    if high == [False, True, False]:
+        return "green"
+    if high == [False, False, True]:
+        return "blue"
+    return "other"
+
+
+# Candidate readings of offsets 4..6. Plain RGB is already contradicted by
+# ff ff ff producing red, but it stays in the list so the contradiction is
+# visible in the output rather than assumed.
+COLOUR_MODELS = {
+    "plain RGB (4,5,6)": lambda a, b, c: (a, b, c),
+    "BGR (6,5,4)": lambda a, b, c: (c, b, a),
+    "GRB (5,4,6)": lambda a, b, c: (b, a, c),
+    "R, inverted G, inverted B": lambda a, b, c: (a, 0xFF - b, 0xFF - c),
+    "fully inverted": lambda a, b, c: (0xFF - a, 0xFF - b, 0xFF - c),
+}
+
+COLOUR_TRIALS = [
+    (0xFF, 0x00, 0x00),
+    (0x00, 0xFF, 0x00),
+    (0x00, 0x00, 0xFF),
+    (0xFF, 0xFF, 0xFF),
+    (0x00, 0x00, 0x00),
+]
+
+
+def exp_colour(link, journal, timeout: int) -> Dict[str, str]:
+    """What do offsets 4..6 actually encode?
+
+    Each trial blanks first, so exactly one segment is lit and the observation
+    cannot be contaminated by whatever the previous trial left behind.
+    """
+    blank = protocol.build_probe(opcode=OP_BLANK)
+    answers: Dict[str, str] = {}
+    print(f"{len(COLOUR_TRIALS)} trials under opcode {OP_SET:02x}. Name the colour")
+    print("you see on the lit segment, or say 'off'.\n")
+    for r, g, b in COLOUR_TRIALS:
+        key = f"{r:02x}{g:02x}{b:02x}"
+        print(f"bytes 4..6 = {r:02x} {g:02x} {b:02x}")
+        payload = protocol.build_probe(r=r, g=g, b=b, opcode=OP_SET)
+        answers[key] = _step(link, journal, f"exp:colour:{key}", [blank, payload],
+                             "colour? (red/green/blue/white/off/describe)", timeout)
+    return answers
+
+
+def verdict_colour(answers: Dict[str, str]) -> str:
+    observed = {}
+    for key, answer in answers.items():
+        names = [n for n in classify(answer) if n != "nothing"]
+        if names:
+            observed[key] = names
+
+    if not observed:
+        return "No trial produced a nameable colour. Offsets 4..6 may not be colour at all."
+
+    lines = ["observed:"]
+    for key, names in observed.items():
+        lines.append(f"  {key} -> {'/'.join(names)}")
+
+    lines.append("")
+    survivors = []
+    for label, model in COLOUR_MODELS.items():
+        contradictions = []
+        for key, names in observed.items():
+            raw = (int(key[0:2], 16), int(key[2:4], 16), int(key[4:6], 16))
+            predicted = name_rgb(*model(*raw))
+            if predicted == "other":
+                continue
+            if predicted not in names:
+                contradictions.append(f"{key} predicted {predicted}, saw {'/'.join(names)}")
+        if contradictions:
+            lines.append(f"  ruled out: {label}  ({contradictions[0]})")
+        else:
+            survivors.append(label)
+
+    lines.append("")
+    if len(survivors) == 1:
+        lines.append(f"Consistent with exactly one model: {survivors[0]}")
+    elif survivors:
+        lines.append("Still consistent with: " + ", ".join(survivors))
+        lines.append("More trials needed to separate them.")
+    else:
+        lines.append("No candidate model fits. Offsets 4..6 are not a colour triple")
+        lines.append("in any obvious ordering — the colour data likely lives elsewhere")
+        lines.append("in the packet, or these bytes are an index into a palette.")
+    return "\n".join(lines)
+
+
+def exp_zones(link, journal, timeout: int) -> Dict[str, str]:
+    """Which byte selects the segment, and where is each segment physically?
+
+    Uses the one byte pattern known to produce a visible result, so the trial
+    does not depend on having decoded the colour encoding first.
+    """
+    blank = protocol.build_probe(opcode=OP_BLANK)
+    answers: Dict[str, str] = {}
+    print("Blanking, then lighting one segment at a time by varying byte 1.")
+    print("Say where the lit segment is (e.g. 'bottom left', 'top right'),")
+    print("or press Enter if nothing lit.\n")
+    for index in range(0x00, 0x08):
+        print(f"byte 1 = {index:02x}")
+        payload = protocol.build_probe(r=0xFF, g=0xFF, b=0xFF, opcode=OP_SET, index=index)
+        answers[f"{index:02x}"] = _step(
+            link, journal, f"exp:zones:{index:02x}", [blank, payload],
+            "which segment lit?", timeout)
+    return answers
+
+
+def verdict_zones(answers: Dict[str, str]) -> str:
+    lit = {k: v for k, v in answers.items() if v and "nothing" not in classify(v)}
+    if not lit:
+        return ("Byte 1 lit nothing at any value 00-07. It is not the segment\n"
+                "selector — try byte 2, or the bytes past offset 10.")
+    distinct = len(set(lit.values()))
+    lines = [f"byte 1 lit something at {len(lit)} of 8 values, "
+             f"{distinct} distinct position(s):"]
+    for key, answer in lit.items():
+        lines.append(f"  {key} -> {answer}")
+    lines.append("")
+    if distinct == 1:
+        lines.append("Every value lit the same place, so byte 1 does not select the")
+        lines.append("segment. The selector is a different offset.")
+    else:
+        lines.append("Byte 1 moves the lit segment — it is the segment selector.")
+        lines.append("Next: extend the range past 07 to find how many segments exist.")
+    return "\n".join(lines)
+
+
 EXPERIMENTS = {
     "commit": (exp_commit, verdict_commit,
                "is 0x0d an off command or the commit half of stage/commit?"),
     "opcodes": (exp_opcodes, verdict_opcodes,
                 "which byte-0 values change the lighting at all?"),
+    "colour": (exp_colour, verdict_colour,
+               "what do offsets 4..6 encode, given ff ff ff produced red?"),
+    "zones": (exp_zones, verdict_zones,
+              "does byte 1 select which segment lights?"),
 }
 
 

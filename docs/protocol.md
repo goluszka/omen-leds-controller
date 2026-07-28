@@ -83,6 +83,24 @@ signature, and nothing more.
 oracle. The design's step-2 go/no-go fails here, so the decode falls entirely to
 visual bisection with a human observer. Plan effort accordingly.
 
+### `0x0d` blanks the lighting; `0x05` lights one segment
+
+`probe.py experiment commit`, session of 2026-07-28. Three trials:
+
+| Packet | Result |
+|---|---|
+| `0d 00 00 d0 ff 00 00 0f 06 00 03` | all off |
+| `0d 00 00 d0 00 ff 00 0f 06 00 03` | all off |
+| `01 …0000ff…` then `0d …000000…` | all off |
+| `05 00 00 d0 ff ff ff 0f 06 00 03` | **bottom-left segment lit red**, rest off |
+
+`0x0d` blanks regardless of what offsets 4–6 contain, so it is an **off**
+command, not the commit half of a stage/commit pair. The staging hypothesis is
+refuted: blue staged with `0x01` did not survive a black `0x0d`.
+
+`0x05` lights exactly one segment while leaving the rest dark, so it addresses a
+single element rather than the whole strip.
+
 ### Reply byte 0 echoes an opcode
 
 | TX byte 0 | RX byte 0 |
@@ -111,21 +129,20 @@ deal.
 
 **Test:** send `02`, then `00`, then read. If the reply echoes `02`, confirmed.
 
-### `0x0d` either blanks the lighting or commits staged state
+### Offsets 4–6 are not a plain RGB triple
 
-`0d 00 00 d0 00 00 00 0f 06 00 03` turned the LEDs out — the first reproducible
-LED effect observed under correct 64-byte framing, and consistent with the prior
-attempt's unlogged claim that `05` lights and `0d` extinguishes.
+```
+05 00 00 d0 ff ff ff 0f 06 00 03  ->  bottom-left segment lit RED
+```
 
-Two readings fit the evidence equally well:
+White in, red out. Whatever offsets 4–6 encode, it is not R, G, B in that order.
+Candidate readings still open: a different channel ordering, inverted channels,
+or an index into a palette rather than a colour at all. `probe.py experiment
+colour` eliminates them by trial.
 
-1. `0x0d` is an **off** command and ignores the RGB bytes.
-2. `0x0d` is a **commit**, and it applied the black that seven preceding `0x01`
-   packets — all carrying RGB `00 00 00` — had been staging without visible
-   effect.
-
-The distinction decides the entire write model, so it is resolved first:
-`probe.py experiment commit`.
+Note the prior attempt's claim that `05` with `ff 00 00` produced *white* comes
+from `legacy/omen_find_led_offset.py`, which sent 63-byte reports and also
+overwrote one byte per iteration. It is not evidence and is not used here.
 
 ### Packet layout
 
@@ -201,11 +218,18 @@ Byte counts echoed by hidapi, not device responses. See framing above.
 `legacy/red_dump.txt` and `legacy/blue_dump.txt`. Those reads never observed
 state, so nothing derived from them is evidence.
 
+### `0x01` does nothing visible
+
+Every `0x01` packet sent so far — varying marker, mode, effect and RGB — changed
+the lighting in no observable way, while `0x05` and `0x0d` both did. `0x01` is
+accepted (it echoes) but its effect, if any, is not visual.
+
 ## Open questions, in the order they block progress
 
-1. Is `0x0d` an off command or a commit? (`probe.py experiment commit`)
-2. Do the RGB bytes at 4–6 control colour under any opcode?
-3. Which opcodes light anything at all? (`probe.py experiment opcodes`)
-4. Which byte selects the zone, and what is the physical zone map?
+1. What do offsets 4–6 encode, given white in produced red out?
+   (`probe.py experiment colour`)
+2. Which byte selects the segment? (`probe.py experiment zones`)
+3. How many segments are there, and where is each one physically?
+4. Which other opcodes do anything? (`probe.py experiment opcodes`)
 5. What hands control back to the OSD?
-6. Is brightness a separate field or premultiplied into RGB?
+6. Is brightness a separate field or premultiplied into the colour bytes?
