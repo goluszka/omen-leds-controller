@@ -1,8 +1,12 @@
 __pycache__/
 *.pyc
 .venv/
-data/sessions/*.jsonl
+# Runtime state (the last frame rendered), not evidence.
 data/state.json
+
+# Session journals ARE tracked: docs/protocol.md rests on them and AGENTS.md
+# names them as an authoritative source, so a clone that lacked them would cite
+# evidence nobody can read.
 *.egg-info/
 build/
 dist/

@@ -1,0 +1,24 @@
+{"ts": "2026-07-28T23:40:24", "session": "20260728-234024", "seq": 1, "kind": "note", "note": "opened 03f0:07b0 (ENE / OMEN 27k External Light Device)"}
+{"ts": "2026-07-28T23:40:24", "session": "20260728-234024", "seq": 2, "kind": "note", "note": "baseline: read-only, no output reports sent"}
+{"ts": "2026-07-28T23:40:24", "session": "20260728-234024", "seq": 3, "kind": "note", "label": "baseline:feature", "note": "get_feature(0) failed: read error"}
+{"ts": "2026-07-28T23:40:24", "session": "20260728-234024", "seq": 4, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:24", "session": "20260728-234024", "seq": 5, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:24", "session": "20260728-234024", "seq": 6, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:24", "session": "20260728-234024", "seq": 7, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:24", "session": "20260728-234024", "seq": 8, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:24", "session": "20260728-234024", "seq": 9, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:24", "session": "20260728-234024", "seq": 10, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:24", "session": "20260728-234024", "seq": 11, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:25", "session": "20260728-234024", "seq": 12, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:25", "session": "20260728-234024", "seq": 13, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:25", "session": "20260728-234024", "seq": 14, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:25", "session": "20260728-234024", "seq": 15, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:25", "session": "20260728-234024", "seq": 16, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:25", "session": "20260728-234024", "seq": 17, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:25", "session": "20260728-234024", "seq": 18, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:25", "session": "20260728-234024", "seq": 19, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:25", "session": "20260728-234024", "seq": 20, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:25", "session": "20260728-234024", "seq": 21, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:26", "session": "20260728-234024", "seq": 22, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:26", "session": "20260728-234024", "seq": 23, "kind": "rx", "label": "baseline:idle", "timeout": true}
+{"ts": "2026-07-28T23:40:26", "session": "20260728-234024", "seq": 24, "kind": "note", "note": "closed"}
