@@ -163,3 +163,40 @@ class TestPackagingMetadata:
 
     def test_the_runtime_dependency_is_declared(self):
         assert "hidapi" in self._setup_cfg()["options"]["install_requires"]
+
+
+class TestExamples:
+    """Examples are documentation that can rot; at minimum they must compile
+    and use only the public API."""
+
+    def _examples(self):
+        directory = os.path.join(ROOT, "examples")
+        return [os.path.join(directory, n) for n in sorted(os.listdir(directory))
+                if n.endswith(".py")]
+
+    def test_there_is_at_least_one(self):
+        assert self._examples()
+
+    def test_they_compile(self):
+        import py_compile
+
+        for path in self._examples():
+            py_compile.compile(path, doraise=True)
+
+    def test_they_import_from_the_public_surface(self):
+        for path in self._examples():
+            source = open(path, encoding="utf-8").read()
+            for line in source.splitlines():
+                if line.startswith("from omenled import"):
+                    for name in line.split("import", 1)[1].split(","):
+                        assert name.strip() in omenled.__all__, f"{name} in {path}"
+
+
+class TestWriteInterval:
+    def test_the_default_interval_is_the_probing_margin(self, fake_hid):
+        with omenled.open_lighting() as lights:
+            assert lights.transport._limiter.min_interval == 0.05
+
+    def test_animation_can_lower_it_without_touching_privates(self, fake_hid):
+        with omenled.open_lighting(min_interval=0.002) as lights:
+            assert lights.transport._limiter.min_interval == 0.002

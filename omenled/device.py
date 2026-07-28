@@ -100,7 +100,8 @@ class Lighting:
 
 @contextmanager
 def open_lighting(journal: Union[bool, Journal, NullJournal] = False,
-                  session: Optional[str] = None) -> Iterator[Lighting]:
+                  session: Optional[str] = None,
+                  min_interval: float = 0.05) -> Iterator[Lighting]:
     """Open the monitor's lighting for the duration of a `with` block.
 
         with open_lighting() as lights:
@@ -111,12 +112,17 @@ def open_lighting(journal: Union[bool, Journal, NullJournal] = False,
     unexpected file writes are a defect. Pass `journal=True` to record a session
     under the user data directory, or supply your own Journal.
 
+    `min_interval` is the minimum gap between writes. The 50 ms default is a
+    safety margin chosen for probing an undocumented controller, not a measured
+    device limit; lower it for animation, but measure rather than assume the
+    device keeps up.
+
     The lighting is left as rendered when the block exits — a lighting tool that
     blanked the panel on exit would be useless. Call `off()` explicitly.
     """
     log = Journal(session=session) if journal is True else (
         journal if journal else NullJournal())
-    transport = Transport(log)
+    transport = Transport(log, min_interval=min_interval)
     try:
         transport.open()
         yield Lighting(transport)

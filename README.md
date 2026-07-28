@@ -88,6 +88,16 @@ unplug the USB cable or reset the monitor from the OSD to get it back.
 **Lighting persists after exit.** Nothing is blanked when the process ends; call
 `off()` if that is what you want.
 
+## Building on top of this
+
+`AGENTS.md` is written for AI agents picking this up cold — the full protocol
+inline, the constraints that bite, and the mistakes worth not repeating. It also
+covers driving the lighting from a native macOS app, including the one framing
+difference between hidapi and `IOHIDDeviceSetReport` that silently shifts every
+LED by one.
+
+`examples/pulse.py` is a working animation showing the render loop.
+
 ## Layout
 
 ```
@@ -101,12 +111,13 @@ omenled/
   safety.py      Refusal list for payloads resembling flash/bootloader commands.
 tools/probe.py   Reverse-engineering workbench: the experiments that decoded
                  the protocol, kept so findings can be reproduced or extended.
+examples/        Runnable reference code.
 legacy/          An earlier attempt's scripts. Read the REFUTED section of
                  docs/protocol.md before trusting anything in there.
 ```
 
 ```sh
-python3 -m pytest tests/ -q      # 392 tests, no hardware needed
+python3 -m pytest tests/ -q      # 397 tests, no hardware needed
 ```
 
 ## Still open
