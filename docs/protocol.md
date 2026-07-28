@@ -176,9 +176,13 @@ Session `20260728-234835`, all with the OSD confirmed locked beforehand:
 | opcode 02 | `02 00 00 d0 00 00 00 0f 06 00 03` |
 | opcode 0d | `0d 00 00 d0 00 00 00 0f 06 00 03` |
 
-None cleared the OSD lock. USB replug remains the only known reset. The release
-mechanism is likely a distinct opcode, or tied to the USB session rather than to
-any packet.
+None cleared the OSD lock. The release mechanism is likely a distinct opcode, or
+tied to the USB session rather than to any packet.
+
+Two resets are known to work, both out-of-band: USB replug, and a monitor reset
+from the OSD (reported 2026-07-28, which also restored the lighting to its
+default on-state). Neither is a protocol finding — they are the fallback while
+the release command remains unknown.
 
 ### Report IDs `0xE0`, `0x0C`, `0xBB`, `0x3F`, `0xC0`
 
