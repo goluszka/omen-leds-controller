@@ -22,6 +22,8 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import readline  # noqa: F401  — gives input() line editing; an arrow key
+                 # once landed in an answer as "^[[A" and lost an observation
 import sys
 import time
 from typing import Dict, List, Optional
@@ -1226,8 +1228,17 @@ def verdict_tail(answers: Dict[str, str]) -> str:
     lines.append("")
 
     def whole(key: str) -> bool:
+        """True only for unqualified completeness.
+
+        "Whole diamond except of middle led" is not whole. Matching the word
+        "whole" alone once reported three separate trials as fixes when every
+        one of them had reproduced the fault verbatim.
+        """
         value = answers.get(key, "").lower()
-        return "whole" in value or bool(re.search(r"\b(yes|tak|all)\b", value))
+        if re.search(r"\b(except|but|without|missing|apart from|"
+                     r"opr[oó]cz|poza|bez)\b", value):
+            return False
+        return bool(re.search(r"\b(whole|entire|all|yes|tak|ca[lł]\w*)\b", value))
 
     survives_off = not re.search(
         r"\b(no|none|nie|dark|off|nothing)\b", answers.get("off", "").lower())
@@ -1263,7 +1274,99 @@ def verdict_tail(answers: Dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def exp_led0(link, journal, timeout: int) -> Dict[str, str]:
+    """Does the LED data start at byte 8 rather than byte 9?
+
+    Byte 8 has been 0x06 on every write ever made. If it is LED 0 rather than a
+    header byte, it has been sitting at 6/255 — about 2% — which next to
+    full-brightness neighbours reads as unlit. That would make the strip 56
+    LEDs, starting mid-bottom-left, which is exactly where the dark LED is.
+
+    Trial 3 is the discriminating one: it predicts that setting byte 8 alone
+    lights precisely the LED that has never lit, and nothing else.
+    """
+    blank = protocol.build_probe(opcode=OP_BLANK)
+    answers: Dict[str, str] = {}
+
+    def planes_with(byte8: int, data: int) -> List[bytes]:
+        out = []
+        for plane in protocol.PLANES:
+            packet = protocol.plane_packet(plane, [data] * protocol.LED_COUNT)
+            out.append(protocol.with_byte(packet, 8, byte8))
+        return out
+
+    def trial(key: str, prediction: str, packets: List[bytes], question: str) -> None:
+        print(f"\n{key}\n  predicting: {prediction}")
+        answers[key] = _step(link, journal, f"led0:{key}", packets, question, timeout)
+
+    trial("byte8 = ff, all lit",
+          "the dark LED finally lights — the diamond is completely white",
+          [blank] + planes_with(0xFF, 0xFF),
+          "is the diamond COMPLETELY white, no gaps? (yes / describe the gap)")
+
+    trial("byte8 = 00, all lit",
+          "the same single LED dark again, confirming byte 8 drives it",
+          [blank] + planes_with(0x00, 0xFF),
+          "is that one LED dark again? (yes / no / describe)")
+
+    trial("byte8 alone",
+          "ONLY the previously-dark LED lights, everything else off",
+          [blank] + planes_with(0xFF, 0x00),
+          "how many LEDs are lit and where?")
+    return answers
+
+
+def verdict_led0(answers: Dict[str, str]) -> str:
+    def affirms(key: str) -> bool:
+        value = answers.get(key, "").lower()
+        if re.search(r"\b(except|but|without|missing|gap|opr[oó]cz|poza|bez)\b", value):
+            return False
+        return bool(re.search(r"\b(yes|tak|complete\w*|whole|entire|all)\b", value))
+
+    lines = ["trials:", ""]
+    for key, answer in answers.items():
+        lines.append(f"  {key:20} {answer}")
+    lines.append("")
+
+    filled = affirms("byte8 = ff, all lit")
+    returned = affirms("byte8 = 00, all lit")
+    alone = answers.get("byte8 alone", "").lower()
+    single = bool(re.search(r"\b(one|1|single|jed\w*)\b", alone))
+
+    if filled and returned and single:
+        lines += [
+            "CONFIRMED: the LED data starts at byte 8, not byte 9.",
+            "",
+            "The strip is 56 LEDs. Byte 8 is LED 0 and has been pinned at 0x06 —",
+            "about 2% brightness — on every write we ever made, which is why it",
+            "read as a dead LED.",
+            "",
+            "Fix: DATA_FIRST = 8 in omenled/protocol.py, and drop byte 8 from",
+            "HEADER_TAIL. LED_COUNT becomes 56 and the whole diamond is",
+            "addressable.",
+        ]
+    elif filled:
+        lines += [
+            "Byte 8 lights the missing LED, so it is pixel data rather than a",
+            "header byte — but the confirming trials did not both agree, so",
+            "check the answers above before changing DATA_FIRST.",
+        ]
+    else:
+        lines += [
+            "Byte 8 does not light the missing LED, so the data does not start",
+            "there. With byte 7, byte 1 and the chunk index all excluded, the",
+            "likeliest remaining explanation is a dead LED in the panel itself —",
+            "which no protocol change will fix.",
+            "",
+            "A quick way to tell: the OSD's own lighting. If that LED stays dark",
+            "under the monitor's built-in effects too, it is hardware.",
+        ]
+    return "\n".join(lines)
+
+
 EXPERIMENTS = {
+    "led0": (exp_led0, verdict_led0,
+             "does the LED data start at byte 8, making the strip 56 LEDs?"),
     "tail": (exp_tail, verdict_tail,
              "why does part of the bottom-left segment never respond?"),
     "confirm": (exp_confirm, verdict_confirm,

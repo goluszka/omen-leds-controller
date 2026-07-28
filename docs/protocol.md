@@ -218,19 +218,35 @@ Two trials, both predicted before transmitting:
   LED 0, which stayed **white**, holding the green and blue set by the previous
   trial. Planes are independent buffers that persist until overwritten.
 
-### Open: part of the bottom-left segment never responds
+### Byte 7 is not a segment mask; byte 1 is ignored
 
-`omenled.cli fill '#00ff00'` and `gradient red blue` both light the diamond
-correctly *except* a patch of the bottom-left segment, where part stays dark and
-part stays stuck white. Reproducible across commands and unaffected by `off`.
+`probe.py experiment tail`, 2026-07-29. Every trial returned the identical
+observation — "whole diamond except of middle led in left bottom segment":
 
-Leading hypothesis: **byte 7 is a segment write-mask and byte 8 a segment
-count.** They have been held at `0x0f` and `0x06` on every write we have ever
-made. `0x0f` is four bits set against a count of six, which would mean two
-segments have never been addressed — and an unaddressed segment behaves exactly
-like this, ignoring both writes and blanking.
+| Trial | Result |
+|---|---|
+| `off` | **fully dark** — nothing is stranded outside our reach |
+| full white, header as usual | one LED dark |
+| byte 7 = `3f` | unchanged |
+| byte 7 = `ff` | unchanged |
+| chunk index = 1 | unchanged |
 
-`probe.py experiment tail` tests that, and falls back to the chunk index.
+So byte 7 is not a segment write-mask, and byte 1 is ignored entirely — a second
+independent finding that it is not a chunk index. And because `off` blanks
+everything, no part of the panel is unaddressable in principle.
+
+What remains is **exactly one LED**, mid bottom-left, that never lights.
+
+### Open: is the data start byte 8, making the strip 56 LEDs?
+
+Byte 8 has been `0x06` on every write ever made. If it is LED 0 rather than a
+header byte, it has been sitting at 6/255 — roughly 2% — which beside
+full-brightness neighbours reads as unlit. That would make the strip **56 LEDs**
+beginning mid bottom-left, which is precisely where the dark LED is.
+
+`probe.py experiment led0` tests it, and predicts that setting byte 8 alone
+lights precisely that LED and nothing else. If it fails, a dead LED in the panel
+becomes the likeliest explanation, which no protocol change fixes.
 
 ### Open: LEDs beyond the first 55
 

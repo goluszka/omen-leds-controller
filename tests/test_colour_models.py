@@ -436,3 +436,66 @@ class TestVerdictTail:
 
     def test_every_trial_is_echoed(self):
         assert "peculiar" in probe.verdict_tail({"off": "peculiar"})
+
+
+class TestWholeQualifiers:
+    """The verdict must not read "whole X except Y" as completeness.
+
+    Matching the bare word "whole" once reported three trials as fixes when
+    every one of them had reproduced the fault verbatim.
+    """
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            "Whole diamond except of middle led in left bottom segment",
+            "all lit but one",
+            "whole thing without the corner",
+            "entire diamond, missing one led",
+            "całość oprócz jednego",
+        ],
+    )
+    def test_qualified_completeness_is_not_completeness(self, answer):
+        assert not probe.verdict_tail({"byte7 = 3f": answer}).count("Fixed by")
+
+    @pytest.mark.parametrize("answer", ["yes", "whole diamond white", "tak", "all white"])
+    def test_unqualified_completeness_still_counts(self, answer):
+        assert "Fixed by" in probe.verdict_tail({"off": "no", "byte7 = 3f": answer})
+
+
+class TestVerdictLed0:
+    def _confirmed(self):
+        return {
+            "byte8 = ff, all lit": "yes, completely white",
+            "byte8 = 00, all lit": "yes, dark again",
+            "byte8 alone": "one led lit, bottom left middle",
+        }
+
+    def test_all_three_trials_agreeing_confirms_the_offset(self):
+        text = probe.verdict_led0(self._confirmed())
+        assert "CONFIRMED" in text
+        assert "starts at byte 8" in text
+        assert "56 LEDs" in text
+        assert "DATA_FIRST = 8" in text
+
+    def test_a_gap_in_the_first_trial_is_not_completeness(self):
+        answers = self._confirmed()
+        answers["byte8 = ff, all lit"] = "whole diamond except the same led"
+        text = probe.verdict_led0(answers)
+        assert "CONFIRMED" not in text
+        assert "does not light the missing LED" in text
+
+    def test_partial_agreement_withholds_the_change(self):
+        answers = self._confirmed()
+        answers["byte8 alone"] = "hard to tell"
+        text = probe.verdict_led0(answers)
+        assert "CONFIRMED" not in text
+        assert "check the answers above" in text
+
+    def test_a_negative_result_names_the_hardware_possibility(self):
+        text = probe.verdict_led0({"byte8 = ff, all lit": "still one dark led"})
+        assert "dead LED in the panel" in text
+        assert "OSD" in text
+
+    def test_every_answer_is_echoed(self):
+        assert "peculiar" in probe.verdict_led0({"byte8 alone": "peculiar"})
