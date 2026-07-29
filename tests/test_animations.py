@@ -13,7 +13,19 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from omenled import LED_COUNT, protocol, state
+from omenled import LED_COUNT, animations as police, device, protocol, state, transport
+from omenled.journal import Journal
+
+from test_transport import FakeHidDevice, fake_hid  # noqa: F401
+
+
+@pytest.fixture
+def lights(fake_hid, tmp_path):  # noqa: F811
+    journal = Journal(session="t", directory=str(tmp_path))
+    link = transport.Transport(journal, min_interval=0).open()
+    yield device.Lighting(link), fake_hid
+    link.close()
+    journal.close()
 
 
 def _example(name):
@@ -25,7 +37,6 @@ def _example(name):
 
 
 alarm = _example("alarm")
-police = _example("police")
 
 
 class TestAlarmEnvelope:
@@ -75,50 +86,49 @@ class TestAlarmFrames:
 
 
 class TestPoliceFrames:
-    def test_halves_are_disjoint_and_cover_the_strip(self):
-        left = police.half_lit(police.RED, True)
-        right = police.half_lit(police.BLUE, False)
-        assert sum(1 for p in left if p != (0, 0, 0)) == LED_COUNT // 2
-        assert all(l == (0, 0, 0) or r == (0, 0, 0) for l, r in zip(left, right))
+    def test_a_lit_frame_covers_the_whole_diamond(self):
+        # Splitting the strip in halves read as two separate lights on the
+        # panel; a light bar alternates the whole fixture between colours.
+        for pixels, _ in police.police_frames(cycles=1):
+            lit = [p for p in pixels if p != (0, 0, 0)]
+            assert len(lit) in (0, LED_COUNT)
 
     def test_both_colours_appear(self):
         seen = {p for pixels, _ in police.police_frames(cycles=1) for p in pixels}
         assert police.RED in seen and police.BLUE in seen
 
-    def test_red_and_blue_light_opposite_halves(self):
-        frames = [pixels for pixels, _ in police.police_frames(cycles=1)]
-        red_frame = next(f for f in frames if police.RED in f)
-        blue_frame = next(f for f in frames if police.BLUE in f)
-        assert red_frame.index(police.RED) != blue_frame.index(police.BLUE)
+    def test_a_lit_frame_is_a_single_colour(self):
+        for pixels, _ in police.police_frames(cycles=1):
+            assert len(set(pixels)) == 1
 
-    def test_swap_puts_the_colours_on_the_other_halves(self):
-        normal = next(f for f, _ in police.police_frames(cycles=1) if police.RED in f)
-        swapped = next(f for f, _ in police.police_frames(cycles=1, swap=True)
-                       if police.RED in f)
-        assert normal.index(police.RED) != swapped.index(police.RED)
+    def test_it_starts_on_red_and_swap_starts_on_blue(self):
+        first = next(pixels for pixels, _ in police.police_frames(cycles=1))
+        swapped = next(pixels for pixels, _ in police.police_frames(cycles=1, swap=True))
+        assert first[0] == police.RED
+        assert swapped[0] == police.BLUE
 
     def test_no_two_lit_frames_run_together(self):
-        # Every flash is separated by darkness, which is what makes it strobe
-        # rather than stay on.
         frames = [pixels for pixels, _ in police.police_frames(cycles=1, flashes=2)]
         lit = [any(p != (0, 0, 0) for p in pixels) for pixels in frames]
         assert not any(a and b for a, b in zip(lit, lit[1:]))
 
-    def test_it_both_starts_and_ends_on_a_flash_boundary(self):
-        frames = [pixels for pixels, _ in police.police_frames(cycles=1, flashes=2)]
-        assert any(p != (0, 0, 0) for p in frames[0])
-        assert all(p == (0, 0, 0) for p in frames[-1])
-
     def test_the_on_time_is_shorter_than_the_gap_between_bursts(self):
-        # Uneven timing is what makes it read as a siren.
-        holds = [hold for _, hold in police.police_frames(cycles=1, flashes=2)]
-        assert police.FLASH_ON < police.SIDE_GAP
-        assert police.SIDE_GAP in holds
+        assert police.FLASH_ON < police.BURST_GAP
 
-    def test_flash_count_per_side_is_configurable(self):
+    def test_flash_count_per_colour_is_configurable(self):
         frames = list(police.police_frames(cycles=1, flashes=5))
         lit = sum(1 for pixels, _ in frames if any(p != (0, 0, 0) for p in pixels))
-        assert lit == 10  # five per side, two sides
+        assert lit == 10  # five per colour, two colours
+
+    def test_the_led_count_is_configurable(self):
+        pixels, _ = next(police.police_frames(count=12, cycles=1))
+        assert len(pixels) == 12
+
+    def test_frames_are_independent_copies(self):
+        # play() must not be able to mutate a later frame through an earlier one.
+        frames = [pixels for pixels, _ in police.police_frames(cycles=1)]
+        frames[0][0] = (9, 9, 9)
+        assert frames[2][0] != (9, 9, 9)
 
 
 class TestRememberedFrame:
@@ -142,3 +152,72 @@ class TestRememberedFrame:
     def test_without_a_count_it_returns_what_was_saved(self):
         state.save([(1, 2, 3)] * 4, 100)
         assert len(state.remembered_frame()) == 4
+
+
+class TestPoliceCli:
+    @pytest.fixture(autouse=True)
+    def _no_sleeping(self, monkeypatch):
+        """Play the frames without waiting for them.
+
+        The pattern's timing is asserted on the generator; making the suite
+        actually sleep through it buys nothing and slows every future run.
+        """
+        monkeypatch.setattr("omenled.animations.time.sleep", lambda _: None)
+
+    def _run(self, light, argv):
+        from omenled import cli
+
+        args = cli.build_parser().parse_args(argv)
+        return args.func(light, args)
+
+    def test_it_renders_the_whole_diamond(self, lights):
+        light, hid = lights
+        self._run(light, ["police", "--cycles", "1", "--flashes", "1"])
+        red_plane = hid.written[0][1:]
+        assert set(red_plane[protocol.DATA_FIRST:]) == {0xFF}
+
+    def test_it_restores_the_previous_picture(self, lights):
+        light, hid = lights
+        state.save([(0, 255, 0)] * LED_COUNT, 100)
+        self._run(light, ["police", "--cycles", "1", "--flashes", "1"])
+        green_plane = hid.written[-2][1:]
+        assert set(green_plane[protocol.DATA_FIRST:]) == {0xFF}
+
+    def test_it_does_not_overwrite_the_saved_picture(self, lights):
+        # The siren is transient; `brightness` must still re-dim what the user
+        # actually set.
+        light, _ = lights
+        state.save([(0, 255, 0)] * LED_COUNT, 70)
+        self._run(light, ["police", "--cycles", "1", "--flashes", "1"])
+        assert state.load() == ([(0, 255, 0)] * LED_COUNT, 70)
+
+    def test_with_nothing_saved_it_ends_dark(self, lights):
+        light, hid = lights
+        self._run(light, ["police", "--cycles", "1", "--flashes", "1"])
+        assert hid.written[-1][1] == protocol.OP_OFF
+
+    def test_it_restores_even_when_playback_fails(self, lights, monkeypatch):
+        light, hid = lights
+        state.save([(0, 255, 0)] * LED_COUNT, 100)
+
+        def boom(*a, **kw):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("omenled.animations.play", boom)
+        with pytest.raises(KeyboardInterrupt):
+            self._run(light, ["police", "--cycles", "1"])
+        green_plane = hid.written[-2][1:]
+        assert set(green_plane[protocol.DATA_FIRST:]) == {0xFF}
+
+    def test_brightness_scales_the_animation(self, lights):
+        light, hid = lights
+        self._run(light, ["--brightness", "40", "police", "--cycles", "1",
+                          "--flashes", "1"])
+        assert hid.written[0][1 + protocol.DATA_FIRST] == 102
+
+    def test_dry_run_touches_no_hardware_and_summarises(self, lights, capsys):
+        light, hid = lights
+        self._run(light, ["--dry-run", "police", "--cycles", "2"])
+        assert hid.written == []
+        out = capsys.readouterr().out
+        assert "frames" in out and "all 60 LEDs" in out

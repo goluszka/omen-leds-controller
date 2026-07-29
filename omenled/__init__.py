@@ -13,6 +13,7 @@ The protocol had no public documentation; `docs/protocol.md` records how it was
 decoded and how confident each claim is.
 """
 
+from .animations import play, police_frames
 from .device import Lighting, RenderRejected, connect, open_lighting
 from .protocol import (
     DATA_FIRST,
@@ -45,6 +46,9 @@ __all__ = [
     "gradient",
     "scale",
     "remembered_frame",
+    # animation
+    "police_frames",
+    "play",
     # device facts
     "LED_COUNT",
     "DATA_FIRST",

@@ -34,6 +34,7 @@ omen-led set 0 5 10 red        # specific LEDs, others blanked
 omen-led set 3 blue --keep     # leave the rest as they were
 omen-led gradient red blue     # fade across the strip
 omen-led brightness 40         # re-dim the current picture
+omen-led police                # red/blue siren, then restore what was showing
 omen-led chase                 # walk one LED, maps index to position
 omen-led off
 ```
@@ -103,7 +104,9 @@ so the shape can be tested without the monitor:
 |---|---|
 | `pulse.py` | breathing fade; ends dark |
 | `alarm.py` | urgent flash in `#9E0000`, then **restores the previous picture** |
-| `police.py` | red/blue strobe across the two halves of the strip |
+
+The siren graduated from an example to `omen-led police`, with its pattern in
+`omenled/animations.py` — importable as `police_frames()` and `play()`.
 
 `alarm` and `police` restore the last picture set through the CLI when they
 finish, including on Ctrl-C. "Previous" can only mean the last picture
@@ -118,6 +121,7 @@ omenled/
   transport.py   HID I/O. The only place raw bytes reach the device.
   device.py      Framebuffer and rendering.
   cli.py         Command line front end.
+  animations.py  Reusable patterns as pure generators of frames.
   state.py       Remembers the last frame so brightness can re-dim it.
   journal.py     Append-only JSONL session log.
   safety.py      Refusal list for payloads resembling flash/bootloader commands.

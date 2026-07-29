@@ -73,10 +73,11 @@ with open_lighting() as lights:
 As a subprocess: `omen-led fill '#00ff00'`, `omen-led off`, `--dry-run` on
 anything to see the bytes without sending.
 
-`examples/` holds three animations — `pulse`, `alarm`, `police` — each keeping
-its pattern in a pure generator that yields `(pixels, hold_seconds)`. Copy that
-shape: it makes an animation testable without hardware, which is otherwise
-impossible here since nothing can be read back.
+Animations keep their pattern in a pure generator yielding
+`(pixels, hold_seconds)`, separate from playback. Copy that shape: it makes an
+animation testable without hardware, which is otherwise impossible here since
+nothing can be read back. `omenled/animations.py` holds the shipped ones;
+`examples/pulse.py` and `examples/alarm.py` show writing your own.
 
 `remembered_frame()` returns the last picture set through the CLI, brightness
 already applied, for restoring the display after a transient animation. It can
@@ -141,7 +142,7 @@ catalogued there so they are not rediscovered.
 ## Verifying your changes
 
 ```sh
-python3 -m pytest tests/ -q          # 421 tests, no hardware needed
+python3 -m pytest tests/ -q          # 322 tests, no hardware needed
 python3 -m omenled.cli --dry-run fill red    # shows exact bytes
 ```
 

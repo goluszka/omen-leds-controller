@@ -4,6 +4,7 @@
     python3 -m omenled.cli set 0 green
     python3 -m omenled.cli gradient red blue
     python3 -m omenled.cli brightness 40
+    python3 -m omenled.cli police
     python3 -m omenled.cli off
 
 Brightness is applied in software by scaling the intensities. The last frame is
@@ -22,7 +23,7 @@ import sys
 import time
 from typing import List, Optional
 
-from . import protocol, state
+from . import animations, protocol, state
 from .device import Lighting, RenderRejected, open_lighting
 from .transport import DeviceNotFound, TransportError
 
@@ -104,6 +105,44 @@ def cmd_brightness(lights: Lighting, args) -> int:
     return 0
 
 
+def cmd_police(lights: Lighting, args) -> int:
+    """Alternating red and blue bursts, restoring the display afterwards.
+
+    Transient, so it deliberately does not overwrite the saved frame: the
+    picture you set is what `brightness` should still re-dim once the siren
+    stops.
+    """
+    previous = state.remembered_frame(lights.count)
+    frames = list(animations.police_frames(
+        lights.count, cycles=args.cycles, flashes=args.flashes, swap=args.swap))
+
+    if args.brightness is not None:
+        frames = [(protocol.scale(pixels, args.brightness), hold)
+                  for pixels, hold in frames]
+
+    if args.dry_run:
+        seconds = sum(hold for _, hold in frames)
+        print(f"{len(frames)} frames, {seconds:.1f}s, "
+              f"{args.cycles} cycles of {args.flashes} flashes per colour")
+        print(f"first frame: {' '.join(f'{c:02x}' for c in frames[0][0][0])} "
+              f"across all {lights.count} LEDs")
+        return 0
+
+    try:
+        animations.play(lights, frames)
+    finally:
+        # Restore however we leave, including Ctrl-C: a siren that abandons the
+        # lighting mid-flash is worse than one that never ran.
+        if previous is None:
+            lights.off()
+        else:
+            lights.set_all(previous).render(verify=False)
+
+    if previous is None:
+        print("nothing was previously set, so the lighting is now off")
+    return 0
+
+
 def cmd_chase(lights: Lighting, args) -> int:
     """Walk one lit LED along the strip — the quickest way to see the mapping
     between LED index and physical position."""
@@ -149,6 +188,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("brightness", help="re-dim the current picture")
     p.add_argument("percent", type=percent, metavar="0-100")
     p.set_defaults(func=cmd_brightness)
+
+    p = sub.add_parser("police", help="alternating red/blue strobe, then restore")
+    p.add_argument("--cycles", type=int, default=8)
+    p.add_argument("--flashes", type=int, default=3,
+                   help="flashes per colour before switching")
+    p.add_argument("--swap", action="store_true", help="start on blue")
+    p.set_defaults(func=cmd_police)
 
     p = sub.add_parser("chase", help="walk one lit LED along the strip")
     p.add_argument("colour", type=colour, nargs="?", default=(0xFF, 0xFF, 0xFF))
