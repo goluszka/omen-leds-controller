@@ -44,7 +44,11 @@ Colours accept `#rrggbb`, `#rgb`, or a name (`red`, `green`, `blue`, `white`,
 `yellow`, `cyan`, `magenta`, `orange`, `purple`, `pink`, `black`).
 
 `--brightness 0-100` works on any command and is remembered for the next one.
-`--dry-run` prints the exact bytes without sending them.
+`--dry-run` prints the exact bytes without sending them, and needs no monitor
+attached.
+
+Both are accepted on either side of the subcommand — `omen-led --brightness 40
+police` and `omen-led police --brightness 40` are the same thing.
 
 ## API
 

@@ -207,3 +207,96 @@ class TestWriteInterval:
     def test_animation_can_lower_it_without_touching_privates(self, fake_hid):
         with omenled.open_lighting(min_interval=0.002) as lights:
             assert lights.transport._limiter.min_interval == 0.002
+
+
+class TestFlagPositions:
+    """Global flags must work on either side of the subcommand.
+
+    Having --brightness accepted only before it and --speed only after it is
+    arbitrary, and argparse reports the mismatch as "unrecognized argument"
+    rather than "wrong position", which sends people looking for a missing
+    feature.
+    """
+
+    def _args(self, argv):
+        from omenled import cli
+
+        return cli.build_parser().parse_args(argv)
+
+    def test_dry_run_before_the_subcommand(self):
+        assert self._args(["--dry-run", "fill", "red"]).dry_run
+
+    def test_dry_run_after_the_subcommand(self):
+        assert self._args(["fill", "red", "--dry-run"]).dry_run
+
+    def test_brightness_before_the_subcommand(self):
+        assert self._args(["--brightness", "40", "police"]).brightness == 40
+
+    def test_brightness_after_the_subcommand(self):
+        assert self._args(["police", "--brightness", "40"]).brightness == 40
+
+    def test_a_per_command_value_wins_over_the_global_one(self):
+        assert self._args(["--brightness", "10", "fill", "red",
+                           "--brightness", "90"]).brightness == 90
+
+    def test_an_unset_per_command_flag_does_not_clobber_the_global(self):
+        # The failure this guards: the subparser's default overwriting a value
+        # the user gave before the subcommand.
+        assert self._args(["--brightness", "40", "fill", "red"]).brightness == 40
+
+    def test_defaults_survive_when_neither_is_given(self):
+        args = self._args(["fill", "red"])
+        assert args.brightness is None and args.dry_run is False
+
+    def test_speed_is_a_police_flag_and_reads_after_the_subcommand(self):
+        assert self._args(["police", "--speed", "3"]).speed == 3.0
+
+
+class TestDryRunNeedsNoDevice:
+    def test_it_does_not_open_the_device(self, monkeypatch, capsys):
+        from omenled import cli, transport
+
+        class NoDevices:
+            @staticmethod
+            def enumerate(vid, pid):
+                raise AssertionError("a dry run must not touch the device")
+
+        monkeypatch.setattr(transport, "hid", NoDevices)
+        assert cli.main(["--dry-run", "police", "--speed", "2"]) == 0
+        assert "frames" in capsys.readouterr().out
+
+    def test_fill_dry_run_prints_the_packets_without_hardware(self, monkeypatch, capsys):
+        from omenled import cli, transport
+
+        class NoDevices:
+            @staticmethod
+            def enumerate(vid, pid):
+                raise AssertionError("a dry run must not touch the device")
+
+        monkeypatch.setattr(transport, "hid", NoDevices)
+        assert cli.main(["--dry-run", "fill", "red"]) == 0
+        assert "red    plane: 05" in capsys.readouterr().out
+
+
+class TestBusyDevice:
+    def test_a_device_that_will_not_open_gives_a_usable_message(self, monkeypatch):
+        from omenled import transport
+        from omenled.journal import NullJournal
+
+        class Busy:
+            @staticmethod
+            def enumerate(vid, pid):
+                return [{"path": b"fake", "interface_number": 1}]
+
+            @staticmethod
+            def device():
+                class D:
+                    def open_path(self, path):
+                        raise OSError("open failed")
+                return D()
+
+        monkeypatch.setattr(transport, "hid", Busy)
+        with pytest.raises(transport.TransportError) as exc:
+            transport.Transport(NullJournal()).open()
+        assert "could not open it" in str(exc.value)
+        assert "retry" in str(exc.value)

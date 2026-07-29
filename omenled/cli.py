@@ -171,36 +171,52 @@ def build_parser() -> argparse.ArgumentParser:
         prog="omenled", description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--dry-run", action="store_true",
-                        help="show what would be sent without sending it")
-    parser.add_argument("--brightness", type=percent, default=None, metavar="0-100",
-                        help="scale intensities; defaults to the last value used")
+    # Options accepted on either side of the subcommand. Having --brightness
+    # work only before it and --speed only after it is arbitrary, and the
+    # mismatch reads as "unrecognized argument" rather than "wrong position".
+    # SUPPRESS on the per-command copies keeps an unset flag from overwriting
+    # the value given globally.
+    def add_global(target, suppress: bool):
+        default = argparse.SUPPRESS if suppress else None
+        target.add_argument("--dry-run", action="store_true",
+                            default=argparse.SUPPRESS if suppress else False,
+                            help="show what would be sent without sending it")
+        target.add_argument("--brightness", type=percent, default=default,
+                            metavar="0-100",
+                            help="scale intensities; defaults to the last value used")
+
+    add_global(parser, suppress=False)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("off", help="blank every LED")
+    def command(name, **kw):
+        p = sub.add_parser(name, **kw)
+        add_global(p, suppress=True)
+        return p
+
+    p = command("off", help="blank every LED")
     p.set_defaults(func=cmd_off)
 
-    p = sub.add_parser("fill", help="set every LED to one colour")
+    p = command("fill", help="set every LED to one colour")
     p.add_argument("colour", type=colour, help="#rrggbb, #rgb, or a name")
     p.set_defaults(func=cmd_fill)
 
-    p = sub.add_parser("set", help="light specific LEDs")
+    p = command("set", help="light specific LEDs")
     p.add_argument("index", type=int, nargs="+", help=f"0..{protocol.LED_COUNT - 1}")
     p.add_argument("colour", type=colour)
     p.add_argument("--keep", action="store_true",
                    help="leave other LEDs as they were rather than blanking them")
     p.set_defaults(func=cmd_set)
 
-    p = sub.add_parser("gradient", help="fade from one colour to another")
+    p = command("gradient", help="fade from one colour to another")
     p.add_argument("start", type=colour)
     p.add_argument("end", type=colour)
     p.set_defaults(func=cmd_gradient)
 
-    p = sub.add_parser("brightness", help="re-dim the current picture")
+    p = command("brightness", help="re-dim the current picture")
     p.add_argument("percent", type=percent, metavar="0-100")
     p.set_defaults(func=cmd_brightness)
 
-    p = sub.add_parser("police", help="alternating red/blue strobe, then restore")
+    p = command("police", help="alternating red/blue strobe, then restore")
     p.add_argument("--cycles", type=int, default=8)
     p.add_argument("--flashes", type=int, default=3,
                    help="flashes per colour before switching")
@@ -212,7 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     # slower than the pattern asks for.
     p.set_defaults(func=cmd_police, min_interval=0.002)
 
-    p = sub.add_parser("chase", help="walk one lit LED along the strip")
+    p = command("chase", help="walk one lit LED along the strip")
     p.add_argument("colour", type=colour, nargs="?", default=(0xFF, 0xFF, 0xFF))
     p.add_argument("--delay", type=float, default=0.4, help="seconds per LED")
     p.set_defaults(func=cmd_chase)
@@ -222,6 +238,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.dry_run:
+        # Never opens the device: the point of a dry run is to see the bytes
+        # without hardware, and requiring the monitor to be attached defeated
+        # it. Transport.write short-circuits before touching the device.
+        from .journal import NullJournal
+        from .transport import Transport
+
+        return args.func(Lighting(Transport(NullJournal())), args)
+
     try:
         with open_lighting(min_interval=getattr(args, "min_interval", 0.05)) as lights:
             return args.func(lights, args)

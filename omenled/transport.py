@@ -93,7 +93,17 @@ class Transport:
                 "upstream cable is connected to this Mac."
             )
         dev = hid.device()
-        dev.open_path(candidates[0]["path"])
+        try:
+            dev.open_path(candidates[0]["path"])
+        except (OSError, ValueError) as exc:
+            # hidapi raises a bare OSError("open failed") when the device is
+            # present but unavailable — most often another process still has it
+            # open, including a previous run of this tool a moment earlier.
+            raise TransportError(
+                f"found {self.vid:04x}:{self.pid:04x} but could not open it ({exc}). "
+                "Another process may be holding it; wait a moment and retry, or "
+                "replug the monitor's USB cable."
+            ) from exc
         self._dev = dev
         self._released = False
         self.journal.note(
