@@ -38,6 +38,16 @@ def percent(text: str) -> int:
     return value
 
 
+def speed(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number")
+    if not 0 < value <= 20:
+        raise argparse.ArgumentTypeError(f"speed must be between 0 and 20, got {value}")
+    return value
+
+
 def colour(text: str):
     try:
         return protocol.parse_colour(text)
@@ -114,7 +124,8 @@ def cmd_police(lights: Lighting, args) -> int:
     """
     previous = state.remembered_frame(lights.count)
     frames = list(animations.police_frames(
-        lights.count, cycles=args.cycles, flashes=args.flashes, swap=args.swap))
+        lights.count, cycles=args.cycles, flashes=args.flashes, swap=args.swap,
+        speed=args.speed))
 
     if args.brightness is not None:
         frames = [(protocol.scale(pixels, args.brightness), hold)
@@ -122,7 +133,7 @@ def cmd_police(lights: Lighting, args) -> int:
 
     if args.dry_run:
         seconds = sum(hold for _, hold in frames)
-        print(f"{len(frames)} frames, {seconds:.1f}s, "
+        print(f"{len(frames)} frames, {seconds:.1f}s at speed {args.speed}, "
               f"{args.cycles} cycles of {args.flashes} flashes per colour")
         print(f"first frame: {' '.join(f'{c:02x}' for c in frames[0][0][0])} "
               f"across all {lights.count} LEDs")
@@ -194,7 +205,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--flashes", type=int, default=3,
                    help="flashes per colour before switching")
     p.add_argument("--swap", action="store_true", help="start on blue")
-    p.set_defaults(func=cmd_police)
+    p.add_argument("--speed", type=speed, default=1.0, metavar="N",
+                   help="2 runs twice as fast; above ~4 the write rate limits it")
+    # Animation needs writes spaced far closer than the probing safety margin:
+    # a frame is three writes, and at the 50 ms default the strobe ran 2.5x
+    # slower than the pattern asks for.
+    p.set_defaults(func=cmd_police, min_interval=0.002)
 
     p = sub.add_parser("chase", help="walk one lit LED along the strip")
     p.add_argument("colour", type=colour, nargs="?", default=(0xFF, 0xFF, 0xFF))
@@ -207,7 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        with open_lighting() as lights:
+        with open_lighting(min_interval=getattr(args, "min_interval", 0.05)) as lights:
             return args.func(lights, args)
     except DeviceNotFound as exc:
         print(f"error: {exc}", file=sys.stderr)

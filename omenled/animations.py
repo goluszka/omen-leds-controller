@@ -30,7 +30,7 @@ BURST_GAP = 0.12
 
 
 def police_frames(count: int = LED_COUNT, cycles: int = 8, flashes: int = 3,
-                  swap: bool = False) -> Iterator[Frame]:
+                  swap: bool = False, speed: float = 1.0) -> Iterator[Frame]:
     """Alternating red and blue bursts across the whole diamond.
 
     Every LED takes the colour, rather than each colour claiming half the
@@ -38,17 +38,25 @@ def police_frames(count: int = LED_COUNT, cycles: int = 8, flashes: int = 3,
     separate lights on the panel; a real light bar alternates the whole fixture
     between colours, and so does this.
 
-    `swap` starts on blue.
+    `swap` starts on blue. `speed` divides every hold, so 2.0 runs twice as
+    fast — scaling all three intervals together keeps the rhythm, which
+    shortening only the on-time would destroy.
+
+    Note the floor: a frame is three plane writes, and the transport enforces a
+    minimum gap between writes. Past roughly `speed=4` the strobe is limited by
+    that rather than by these numbers. See `Transport(min_interval=…)`.
     """
+    if speed <= 0:
+        raise ValueError(f"speed must be positive, got {speed}")
     dark = [(0, 0, 0)] * count
     order = (BLUE, RED) if swap else (RED, BLUE)
     for _ in range(cycles):
         for colour in order:
             lit = [colour] * count
             for _ in range(flashes):
-                yield list(lit), FLASH_ON
-                yield list(dark), FLASH_OFF
-            yield list(dark), BURST_GAP
+                yield list(lit), FLASH_ON / speed
+                yield list(dark), FLASH_OFF / speed
+            yield list(dark), BURST_GAP / speed
 
 
 def play(lights, frames: Sequence[Frame], verify: bool = False) -> None:

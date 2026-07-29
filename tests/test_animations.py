@@ -221,3 +221,68 @@ class TestPoliceCli:
         assert hid.written == []
         out = capsys.readouterr().out
         assert "frames" in out and "all 60 LEDs" in out
+
+
+class TestSpeed:
+    def test_speed_1_is_the_baseline(self):
+        assert next(police.police_frames(cycles=1))[1] == police.FLASH_ON
+
+    def test_higher_speed_shortens_every_hold_proportionally(self):
+        slow = [h for _, h in police.police_frames(cycles=1)]
+        fast = [h for _, h in police.police_frames(cycles=1, speed=2.0)]
+        assert all(f == pytest.approx(s / 2) for s, f in zip(slow, fast))
+
+    def test_the_rhythm_is_preserved_not_just_the_on_time(self):
+        # Shortening only the flash would turn a siren into a blink.
+        # One cycle covers both colours, so take the first burst only.
+        fast = list(police.police_frames(cycles=1, flashes=1, speed=4.0))
+        on, off, gap = [h for _, h in fast][:3]
+        assert on / off == pytest.approx(police.FLASH_ON / police.FLASH_OFF)
+        assert gap / on == pytest.approx(police.BURST_GAP / police.FLASH_ON)
+
+    def test_frame_count_is_unchanged_by_speed(self):
+        assert len(list(police.police_frames(cycles=2, speed=5.0))) == \
+               len(list(police.police_frames(cycles=2)))
+
+    @pytest.mark.parametrize("bad", [0, -1, -0.5])
+    def test_non_positive_speed_is_refused(self, bad):
+        with pytest.raises(ValueError, match="positive"):
+            list(police.police_frames(speed=bad))
+
+
+class TestAnimationWriteSpacing:
+    def test_police_asks_for_spacing_far_below_the_probing_default(self):
+        """A frame is three writes; at the 50 ms probing margin the strobe ran
+        2.5x slower than the pattern asks for."""
+        from omenled import cli
+
+        args = cli.build_parser().parse_args(["police"])
+        assert args.min_interval <= 0.01
+
+    def test_other_commands_keep_the_conservative_default(self):
+        from omenled import cli
+
+        args = cli.build_parser().parse_args(["fill", "red"])
+        assert getattr(args, "min_interval", None) is None
+
+    def test_the_cli_honours_a_command_s_requested_spacing(self, fake_hid):
+        import omenled
+
+        with omenled.open_lighting(min_interval=0.002) as lights:
+            assert lights.transport._limiter.min_interval == 0.002
+
+
+class TestSpeedParsing:
+    @pytest.mark.parametrize("text", ["1", "2.5", "0.5", "20"])
+    def test_accepted(self, text):
+        from omenled import cli
+
+        assert cli.speed(text) == float(text)
+
+    @pytest.mark.parametrize("text", ["0", "-1", "21", "fast", ""])
+    def test_rejected_with_a_usable_message(self, text):
+        from omenled import cli
+
+        with pytest.raises(Exception) as exc:
+            cli.speed(text)
+        assert "number" in str(exc.value) or "between 0 and 20" in str(exc.value)

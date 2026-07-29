@@ -35,6 +35,7 @@ omen-led set 3 blue --keep     # leave the rest as they were
 omen-led gradient red blue     # fade across the strip
 omen-led brightness 40         # re-dim the current picture
 omen-led police                # red/blue siren, then restore what was showing
+omen-led police --speed 3      # faster strobe
 omen-led chase                 # walk one LED, maps index to position
 omen-led off
 ```
@@ -107,6 +108,12 @@ so the shape can be tested without the monitor:
 
 The siren graduated from an example to `omen-led police`, with its pattern in
 `omenled/animations.py` — importable as `police_frames()` and `play()`.
+
+`--speed N` divides every interval, keeping the rhythm rather than only
+shortening the flash. There is a hard floor: a frame is three plane writes and
+the device declares a 4 ms report interval, so roughly 12 ms per frame is the
+best achievable. Past about `--speed 4` the write rate sets the pace, not the
+pattern.
 
 `alarm` and `police` restore the last picture set through the CLI when they
 finish, including on Ctrl-C. "Previous" can only mean the last picture
