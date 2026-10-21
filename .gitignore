@@ -1,13 +1,19 @@
+# Python
 __pycache__/
 *.pyc
 .venv/
-# Runtime state (the last frame rendered), not evidence.
-data/state.json
+.pytest_cache/
 
-# Session journals ARE tracked: docs/protocol.md rests on them and AGENTS.md
-# names them as an authoritative source, so a clone that lacked them would cite
-# evidence nobody can read.
+# Packaging output
 *.egg-info/
 build/
 dist/
-.pytest_cache/
+
+# Runtime state (the last frame rendered), not evidence.
+data/state.json
+# Interrupted state.save() leftovers.
+*.json.*.tmp
+
+# Session journals under data/sessions/ ARE tracked: docs/protocol.md rests on
+# them and AGENTS.md names them as an authoritative source, so a clone that
+# lacked them would cite evidence nobody can read.
