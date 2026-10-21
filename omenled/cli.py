@@ -168,7 +168,7 @@ def cmd_chase(lights: Lighting, args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="omenled", description=__doc__,
+        prog="omen-led", description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     # Options accepted on either side of the subcommand. Having --brightness
@@ -239,22 +239,20 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_parser().parse_args(argv)
 
-    if args.dry_run:
-        # Never opens the device: the point of a dry run is to see the bytes
-        # without hardware, and requiring the monitor to be attached defeated
-        # it. Transport.write short-circuits before touching the device.
-        from .journal import NullJournal
-        from .transport import Transport
-
-        return args.func(Lighting(Transport(NullJournal())), args)
-
     try:
+        if args.dry_run:
+            # Never opens the device: the point of a dry run is to see the bytes
+            # without hardware, and requiring the monitor to be attached defeated
+            # it. Transport.write short-circuits before touching the device.
+            from .journal import NullJournal
+            from .transport import Transport
+
+            return args.func(Lighting(Transport(NullJournal())), args)
+
         with open_lighting(min_interval=getattr(args, "min_interval", 0.05)) as lights:
             return args.func(lights, args)
-    except DeviceNotFound as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-    except (TransportError, RenderRejected, ValueError, IndexError) as exc:
+    except (DeviceNotFound, TransportError, RenderRejected, ValueError,
+            IndexError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
