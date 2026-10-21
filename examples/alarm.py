@@ -18,8 +18,7 @@ monitor attached.
 import argparse
 import os
 import sys
-import time
-from typing import Iterator, List, Sequence, Tuple
+from typing import Iterator, List, Tuple
 
 # Only needed when running from a checkout; unnecessary once omen-led is
 # installed. Harmless either way.
@@ -27,12 +26,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from omenled import (
     LED_COUNT,
+    DeviceNotFound,
+    TransportError,
     open_lighting,
     parse_colour,
+    play,
     remembered_frame,
     scale,
 )
-from omenled.transport import DeviceNotFound
 
 ALARM_COLOUR = "#9E0000"
 
@@ -71,12 +72,6 @@ def alarm_frames(colour: Pixel, count: int = LED_COUNT, pulses: int = 4,
             yield scale(base, round(level / peak * 100)), hold
 
 
-def play(lights, frames: Sequence[Frame]) -> None:
-    for pixels, hold in frames:
-        lights.set_all(pixels).render(verify=False)
-        time.sleep(hold)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--colour", default=ALARM_COLOUR)
@@ -98,7 +93,7 @@ def main() -> int:
                     lights.off()
                 else:
                     lights.set_all(previous).render(verify=False)
-    except DeviceNotFound as exc:
+    except (DeviceNotFound, TransportError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:

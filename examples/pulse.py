@@ -26,8 +26,14 @@ import time
 # installed. Harmless either way.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from omenled import LED_COUNT, open_lighting, parse_colour, scale
-from omenled.transport import DeviceNotFound
+from omenled import (
+    LED_COUNT,
+    DeviceNotFound,
+    TransportError,
+    open_lighting,
+    parse_colour,
+    scale,
+)
 
 
 def main() -> int:
@@ -43,8 +49,6 @@ def main() -> int:
     try:
         # min_interval is lowered from the default probing margin; measure
         # before pushing it further, since the device's real limit is unknown.
-        # min_interval is lowered from the default probing margin; measure
-        # before pushing it further, since the device's real limit is unknown.
         with open_lighting(min_interval=0.002) as lights:
             for frame in range(frames):
                 phase = frame / (args.fps * 2) * 2 * math.pi
@@ -52,7 +56,7 @@ def main() -> int:
                 lights.set_all(scale(base, level)).render(verify=False)
                 time.sleep(1 / args.fps)
             lights.off()
-    except DeviceNotFound as exc:
+    except (DeviceNotFound, TransportError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
