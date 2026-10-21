@@ -252,6 +252,40 @@ class TestFlagPositions:
         assert self._args(["police", "--speed", "3"]).speed == 3.0
 
 
+class TestArgumentBounds:
+    """Values that would crash or silently misbehave are usage errors."""
+
+    def _rejects(self, argv, capsys):
+        from omenled import cli
+
+        with pytest.raises(SystemExit) as exc:
+            cli.build_parser().parse_args(argv)
+        assert exc.value.code == 2
+        return capsys.readouterr().err
+
+    @pytest.mark.parametrize("flag", ["--cycles", "--flashes"])
+    def test_police_counts_must_be_positive(self, flag, capsys):
+        assert "at least 1" in self._rejects(["police", flag, "0"], capsys)
+
+    def test_the_smallest_police_run_is_accepted(self):
+        from omenled import cli
+
+        args = cli.build_parser().parse_args(["police", "--cycles", "1", "--flashes", "1"])
+        assert (args.cycles, args.flashes) == (1, 1)
+
+    def test_chase_delay_must_not_be_negative(self, capsys):
+        assert "negative" in self._rejects(["chase", "--delay", "-1"], capsys)
+
+    @pytest.mark.parametrize("index", ["-1", "60"])
+    def test_led_index_must_be_on_the_strip(self, index, capsys):
+        assert "outside 0..59" in self._rejects(["set", index, "red"], capsys)
+
+    def test_both_ends_of_the_strip_are_accepted(self):
+        from omenled import cli
+
+        assert cli.build_parser().parse_args(["set", "0", "59", "red"]).index == [0, 59]
+
+
 class TestDryRunNeedsNoDevice:
     def test_it_does_not_open_the_device(self, monkeypatch, capsys):
         from omenled import cli, transport

@@ -48,6 +48,39 @@ def speed(text: str) -> float:
     return value
 
 
+def positive_int(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a whole number")
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
+def seconds(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number")
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must not be negative, got {value}")
+    return value
+
+
+def led_index(text: str) -> int:
+    # Checked at parse time like every other argument, so a bad index is a
+    # usage error reported before the device is even opened.
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an LED number")
+    if not 0 <= value < protocol.LED_COUNT:
+        raise argparse.ArgumentTypeError(
+            f"LED {value} outside 0..{protocol.LED_COUNT - 1}")
+    return value
+
+
 def colour(text: str):
     try:
         return protocol.parse_colour(text)
@@ -201,7 +234,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_fill)
 
     p = command("set", help="light specific LEDs")
-    p.add_argument("index", type=int, nargs="+", help=f"0..{protocol.LED_COUNT - 1}")
+    p.add_argument("index", type=led_index, nargs="+", help=f"0..{protocol.LED_COUNT - 1}")
     p.add_argument("colour", type=colour)
     p.add_argument("--keep", action="store_true",
                    help="leave other LEDs as they were rather than blanking them")
@@ -217,8 +250,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_brightness)
 
     p = command("police", help="alternating red/blue strobe, then restore")
-    p.add_argument("--cycles", type=int, default=8)
-    p.add_argument("--flashes", type=int, default=3,
+    p.add_argument("--cycles", type=positive_int, default=8)
+    p.add_argument("--flashes", type=positive_int, default=3,
                    help="flashes per colour before switching")
     p.add_argument("--swap", action="store_true", help="start on blue")
     p.add_argument("--speed", type=speed, default=1.0, metavar="N",
@@ -230,7 +263,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = command("chase", help="walk one lit LED along the strip")
     p.add_argument("colour", type=colour, nargs="?", default=(0xFF, 0xFF, 0xFF))
-    p.add_argument("--delay", type=float, default=0.4, help="seconds per LED")
+    p.add_argument("--delay", type=seconds, default=0.4, help="seconds per LED")
     p.set_defaults(func=cmd_chase)
 
     return parser
