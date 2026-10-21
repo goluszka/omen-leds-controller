@@ -82,6 +82,41 @@ class TestState:
         state.save([(1, 1, 1)], 10, str(tmp_path / "s.json"))
         assert os.listdir(tmp_path) == ["s.json"]
 
+    def test_a_save_interleaved_with_another_completes_cleanly(self, tmp_path, monkeypatch):
+        # A second save lands while the first is mid-write — what two threads
+        # in one process can do. A shared temp name made the first save raise
+        # FileNotFoundError after writing into the already-renamed file.
+        path = str(tmp_path / "s.json")
+        real_dump = json.dump
+        interleaved = []
+
+        def dump(obj, fh):
+            if not interleaved:
+                interleaved.append(True)
+                state.save([(9, 9, 9)], 90, path)
+            real_dump(obj, fh)
+
+        monkeypatch.setattr(state.json, "dump", dump)
+        state.save([(1, 1, 1)], 10, path)
+
+        assert state.load(path) == ([(1, 1, 1)], 10)  # the last rename wins, whole
+        assert os.listdir(tmp_path) == ["s.json"]
+
+    def test_a_failed_save_keeps_the_old_frame_and_cleans_up(self, tmp_path, monkeypatch):
+        path = str(tmp_path / "s.json")
+        state.save([(1, 2, 3)], 50, path)
+
+        def fail(obj, fh):
+            fh.write('{"pixels": [[')  # partial, then the write dies
+            raise OSError("disk full")
+
+        monkeypatch.setattr(state.json, "dump", fail)
+        with pytest.raises(OSError, match="disk full"):
+            state.save([(9, 9, 9)], 90, path)
+
+        assert state.load(path) == ([(1, 2, 3)], 50)
+        assert os.listdir(tmp_path) == ["s.json"]
+
     def test_it_creates_the_directory(self, tmp_path):
         path = str(tmp_path / "nested" / "deep" / "s.json")
         state.save([(1, 1, 1)], 10, path)

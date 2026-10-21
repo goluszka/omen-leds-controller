@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from typing import List, Optional, Tuple
 
 from . import paths, protocol
@@ -25,13 +26,28 @@ def save(pixels: List[Pixel], brightness: int, path: Optional[str] = None) -> No
     Written to a sibling file and renamed into place, so a concurrent `load` —
     an app shelling out to the CLI while another command runs — sees either
     the old frame or the new one, never a half-written file it would discard.
+
+    The sibling is unique per call, not per process: two saves in one process
+    sharing a name would truncate each other's file, and the second rename
+    would find it already gone.
     """
     path = path or paths.state_file()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = f"{path}.{os.getpid()}.tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump({"pixels": [list(p) for p in pixels], "brightness": brightness}, fh)
-    os.replace(tmp, path)
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=os.path.basename(path) + ".",
+                               suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump({"pixels": [list(p) for p in pixels], "brightness": brightness}, fh)
+        os.replace(tmp, path)
+    except BaseException:
+        # Includes KeyboardInterrupt: a Ctrl-C mid-save must not strand the
+        # temp file. After a successful replace there is nothing to remove.
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def load(path: Optional[str] = None) -> Optional[Tuple[List[Pixel], int]]:
