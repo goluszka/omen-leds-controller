@@ -9,6 +9,27 @@ Evidence ledger. Every entry is tagged:
 
 Last updated: 2026-07-29, after the colour and zones sessions.
 
+## In short
+
+For the protocol without the history:
+
+```
+Output report: exactly 64 bytes, no report ID
+byte  0      opcode: 05 red plane, 06 green, 07 blue, 0d blank all
+bytes 1..2   00 00
+byte  3      d0 (low nibble echoed in the reply status)
+bytes 4..63  60 intensity bytes, one per LED, for the selected plane
+
+Reply byte 3: 0x80 | (request byte 3 & 0x0f) accepted, 0xf0 rejected
+```
+
+Send a frame as three reports, red, green, blue, in that order. The entries
+below are in the order they were established. Some early ones describe layouts
+that later evidence corrected; those carry a **Superseded** note pointing at the
+entry that replaced them. The final layout and the reason it took four attempts
+are under
+[the LED data starts at byte 4](#confirmed-the-led-data-starts-at-byte-4--60-leds-whole-diamond).
+
 ## CONFIRMED
 
 ### Device identity and framing
@@ -117,6 +138,11 @@ and bytes 11–63 have never been anything but zero. The selector is among those
 
 ### The packet tail is a pixel buffer, not a set of fields
 
+> **Superseded** on the data offset by
+> [the LED data starts at byte 4](#confirmed-the-led-data-starts-at-byte-4--60-leds-whole-diamond).
+> Bytes 4–8 were pinned to constants, so they looked inert; they are LEDs 0–4.
+> The pixel-buffer conclusion stands.
+
 `probe.py experiment bisect`, 2026-07-29. Filling byte ranges with `0xff` under
 opcode `0x05`:
 
@@ -142,6 +168,10 @@ The lighting is physically a **diamond** with four segments — top-left,
 top-right, bottom-left, bottom-right.
 
 ### The LED buffer is one byte per LED, not RGB triplets
+
+> **Superseded** on the count: 60 LEDs from byte 4, not 55 from byte 9. See
+> [the LED data starts at byte 4](#confirmed-the-led-data-starts-at-byte-4--60-leds-whole-diamond).
+> One byte per LED stands.
 
 `probe.py experiment stream`, 2026-07-29. A repeating `00 ff 00` pattern written
 from byte 9, byte 10 and byte 11 in turn produced **red at every alignment**.
@@ -180,6 +210,10 @@ byte  1      chunk index (candidate — see below)
 bytes 2..8   00 d0 00 00 00 0f 06   held constant on every accepted write
 bytes 9..63  55 intensity bytes, one per LED, for the selected plane
 ```
+
+> **Superseded** on the layout: bytes 4–8 are LED data, not constant header.
+> See [the LED data starts at byte 4](#confirmed-the-led-data-starts-at-byte-4--60-leds-whole-diamond).
+> Opcode-selects-plane stands.
 
 Implemented as `omenled.protocol.plane_packet` and `frame_packets`.
 
@@ -298,7 +332,7 @@ status = 0x80 | (request_byte3 & 0x0f)     accepted
 Not needed for control, but it means a request can be tagged and its
 acknowledgement matched to it — useful if writes are ever pipelined.
 
-### Reply byte 0 echoes an opcode### Reply byte 0 echoes an opcode
+### Reply byte 0 echoes an opcode
 
 | TX byte 0 | RX byte 0 |
 |---|---|
@@ -361,6 +395,11 @@ spending observations through it.
 
 ### Offsets 4–6 are not a plain RGB triple
 
+> **Superseded** by
+> [the LED data starts at byte 4](#confirmed-the-led-data-starts-at-byte-4--60-leds-whole-diamond):
+> offsets 4–6 are LEDs 0–2, so under opcode `0x05` they are red-plane
+> intensities. That is the white-in, red-out result below.
+
 ```
 05 00 00 d0 ff ff ff 0f 06 00 03  ->  bottom-left segment lit RED
 ```
@@ -375,6 +414,11 @@ from a script that sent 63-byte reports *and* overwrote one byte per iteration.
 It was not evidence and was not used here.
 
 ### Packet layout
+
+> **Superseded** by
+> [the LED data starts at byte 4](#confirmed-the-led-data-starts-at-byte-4--60-leds-whole-diamond).
+> This table is the prior attempt's guess; offsets 4–10 are LEDs 0–6. Kept as
+> the record of what was assumed.
 
 From the packet shape that produced both a reply and a visible LED change:
 

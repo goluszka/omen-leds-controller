@@ -142,7 +142,7 @@ catalogued there so they are not rediscovered.
 ## Verifying your changes
 
 ```sh
-python3 -m pytest tests/ -q          # 322 tests, no hardware needed
+python3 -m pytest tests/ -q          # no hardware needed
 python3 -m omenled.cli --dry-run fill red    # shows exact bytes
 ```
 
