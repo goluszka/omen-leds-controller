@@ -67,6 +67,21 @@ class TestState:
         path.write_text(json.dumps({"pixels": [[1, 2, 3]]}))
         assert state.load(str(path)) is None
 
+    @pytest.mark.parametrize("data", [
+        {"pixels": [[256, 0, 0]], "brightness": 50},
+        {"pixels": [[-1, 0, 0]], "brightness": 50},
+        {"pixels": [[1, 2, 3]], "brightness": 101},
+    ])
+    def test_out_of_range_values_are_rejected(self, tmp_path, data):
+        # Accepting these would only defer the failure to the next render.
+        path = tmp_path / "s.json"
+        path.write_text(json.dumps(data))
+        assert state.load(str(path)) is None
+
+    def test_saving_leaves_no_temporary_file_behind(self, tmp_path):
+        state.save([(1, 1, 1)], 10, str(tmp_path / "s.json"))
+        assert os.listdir(tmp_path) == ["s.json"]
+
     def test_it_creates_the_directory(self, tmp_path):
         path = str(tmp_path / "nested" / "deep" / "s.json")
         state.save([(1, 1, 1)], 10, path)

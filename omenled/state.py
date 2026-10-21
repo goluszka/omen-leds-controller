@@ -14,16 +14,24 @@ import json
 import os
 from typing import List, Optional, Tuple
 
-Pixel = Tuple[int, int, int]
-
 from . import paths, protocol
+
+Pixel = Tuple[int, int, int]
 
 
 def save(pixels: List[Pixel], brightness: int, path: Optional[str] = None) -> None:
+    """Write the frame atomically.
+
+    Written to a sibling file and renamed into place, so a concurrent `load` —
+    an app shelling out to the CLI while another command runs — sees either
+    the old frame or the new one, never a half-written file it would discard.
+    """
     path = path or paths.state_file()
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
         json.dump({"pixels": [list(p) for p in pixels], "brightness": brightness}, fh)
+    os.replace(tmp, path)
 
 
 def load(path: Optional[str] = None) -> Optional[Tuple[List[Pixel], int]]:
@@ -42,9 +50,12 @@ def load(path: Optional[str] = None) -> Optional[Tuple[List[Pixel], int]]:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
         pixels = [tuple(int(c) for c in px) for px in data["pixels"]]
-        if not all(len(px) == 3 for px in pixels):
+        brightness = int(data["brightness"])
+        if not all(len(px) == 3 and all(0 <= c <= 0xFF for c in px) for px in pixels):
             return None
-        return pixels, int(data["brightness"])
+        if not 0 <= brightness <= 100:
+            return None
+        return pixels, brightness
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
