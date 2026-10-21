@@ -1,13 +1,14 @@
 """Packet structure — pure functions, no I/O.
 
-Everything here is either a decoded fact or an explicitly labelled hypothesis.
-Keeping it free of device access is what lets the decode be unit-tested against
-recorded journals with no monitor attached, and lets the eventual CLI reuse it
-without change.
+Two layers live here. The decoded write path (`plane_packet`, `frame_packets`,
+`off_packet`, `parse_reply`) is CONFIRMED; it is what the library uses. The
+probe helpers (`build_probe`, `diff`, `survey`, `annotate`) serve the
+reverse-engineering workbench in `tools/probe.py`.
 
-Nothing in this module is CONFIRMED yet. See docs/protocol.md for the evidence
-ledger; a field graduates to CONFIRMED only when a prediction made *before*
-transmission produces the predicted result.
+Keeping it free of device access is what lets the decode be unit-tested against
+recorded journals with no monitor attached. See docs/protocol.md for the
+evidence ledger; a field graduates to CONFIRMED only when a prediction made
+*before* transmission produces the predicted result.
 """
 
 from __future__ import annotations
@@ -18,34 +19,20 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 REPORT_SIZE = 64
 
 # --------------------------------------------------------------------------
-# Working hypothesis
+# Field labels for probe dumps
 # --------------------------------------------------------------------------
-# Derived from the one packet pair the previous attempt recorded that produced
-# both a response and a visible LED change:
-#
-#   TX  01 00 00 d0 ff 00 00 0f 06 00 03 00...
-#   RX  01 00 00 80 ec ac 00 00 ...
-#
-# and from the repeating tail seen in read-style probes:
-#
-#   RX  80 rr 00 d0 34 05 17 0f 06 00 03
-#
-# The shared `d0 .. 0f 06 00 03` tail in both directions suggests one record
-# layout used for both set and report. Offsets below are guesses to be tested,
-# not findings.
+# Attached to offsets by `annotate`, `ByteDiff` and `FieldSurvey`. Only the
+# header is labelled: from byte 4 on, a request carries LED intensities (see
+# DATA_FIRST). The prior attempt's guesses for 4..10 — R, G, B, brightness,
+# count, effect, mode — are superseded by the CONFIRMED byte-4 data offset in
+# docs/protocol.md: they were LEDs 0..6 pinned to constants, and labelling them
+# so would mislead every dump.
 
-HYPOTHESIS: Dict[int, str] = {
-    0: "opcode",
-    1: "index/zone",
-    2: "sub-index?",
-    3: "record marker (0xd0 on set, 0x80 seen in one reply)",
-    4: "R?",
-    5: "G?",
-    6: "B?",
-    7: "brightness? (0x0f = 15)",
-    8: "count? (0x06 = 6 zones?)",
-    9: "effect?",
-    10: "apply/mode? (0x03)",
+FIELD_LABELS: Dict[int, str] = {
+    0: "opcode: 05/06/07 colour plane, 0d blank; echoed in replies",
+    1: "header 0x00 (hardware brightness untested)",
+    2: "header 0x00 (hardware brightness untested)",
+    3: "request tag 0xd0 / reply status: 0x80|tag ok, 0xf0 rejected",
 }
 
 # The bytes the prior attempt held constant. Retained so experiments can vary
@@ -107,7 +94,7 @@ class ByteDiff:
     right: int
 
     def __str__(self) -> str:
-        note = HYPOTHESIS.get(self.offset)
+        note = FIELD_LABELS.get(self.offset)
         suffix = f"  ({note})" if note else ""
         return f"[{self.offset:02d}] {self.left:02x} -> {self.right:02x}{suffix}"
 
@@ -141,7 +128,7 @@ class FieldSurvey:
         if not self.varying:
             lines.append("  none — samples did not exercise any field")
         for offset, values in self.candidates():
-            note = HYPOTHESIS.get(offset, "")
+            note = FIELD_LABELS.get(offset, "")
             seen = " ".join(f"{v:02x}" for v in values)
             lines.append(f"  [{offset:02d}] {seen}" + (f"   ({note})" if note else ""))
         lines.append(f"constant across all {len(self.constant)} remaining offsets")
@@ -169,14 +156,14 @@ def survey(samples: Iterable[bytes]) -> FieldSurvey:
 
 
 def annotate(payload: bytes, width: int = 16) -> str:
-    """Hex dump with the current hypothesis attached to known offsets."""
+    """Hex dump with the decoded header fields labelled."""
     lines = []
     for start in range(0, len(payload), width):
         chunk = payload[start : start + width]
         hexpart = " ".join(f"{b:02x}" for b in chunk)
         lines.append(f"{start:02d}: {hexpart}")
     lines.append("")
-    for offset, meaning in sorted(HYPOTHESIS.items()):
+    for offset, meaning in sorted(FIELD_LABELS.items()):
         if offset < len(payload):
             lines.append(f"  [{offset:02d}] = {payload[offset]:02x}   {meaning}")
     return "\n".join(lines)
@@ -185,10 +172,11 @@ def annotate(payload: bytes, width: int = 16) -> str:
 # --------------------------------------------------------------------------
 # The decoded write path
 # --------------------------------------------------------------------------
-# Established 2026-07-29 by `probe.py experiment hunt`. The report is a 9-byte
-# header followed by one intensity byte per LED, and the opcode selects which
-# colour plane those intensities apply to. Writing the three planes in turn
-# composes an arbitrary colour per LED.
+# Established 2026-07-29 by `probe.py experiment hunt`, layout corrected by
+# `experiment headerleds`. The report is a 4-byte header followed by one
+# intensity byte per LED, and the opcode selects which colour plane those
+# intensities apply to. Writing the three planes in turn composes an arbitrary
+# colour per LED.
 
 PLANE_RED = 0x05
 PLANE_GREEN = 0x06
