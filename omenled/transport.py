@@ -81,6 +81,7 @@ class Transport:
         self._dev: Optional[Any] = None
         self._release_hook: Optional[Callable[["Transport"], None]] = None
         self._released = False
+        self._exit_hooked = False
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -110,7 +111,11 @@ class Transport:
             f"opened {self.vid:04x}:{self.pid:04x} "
             f"({dev.get_manufacturer_string()} / {dev.get_product_string()})"
         )
-        safety.on_exit(self._release_quietly)
+        # Once per Transport: reopening must not stack another registration,
+        # each of which pins this object until interpreter exit.
+        if not self._exit_hooked:
+            safety.on_exit(self._release_quietly)
+            self._exit_hooked = True
         return self
 
     def close(self) -> None:

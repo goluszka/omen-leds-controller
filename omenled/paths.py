@@ -13,6 +13,7 @@ than user data.
 from __future__ import annotations
 
 import os
+import sys
 
 ENV_VAR = "OMENLED_DATA_DIR"
 
@@ -22,7 +23,7 @@ def data_dir() -> str:
     override = os.environ.get(ENV_VAR)
     if override:
         return os.path.expanduser(override)
-    if os.uname().sysname == "Darwin":
+    if sys.platform == "darwin":
         return os.path.expanduser("~/Library/Application Support/omen-led")
     base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
     return os.path.join(base, "omen-led")
