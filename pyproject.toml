@@ -3,9 +3,13 @@
 # PEP 621 metadata needs setuptools >= 61, and the Python this is developed
 # against ships 58 — a [project] table would make the package uninstallable on
 # the very machine it controls. setup.cfg is understood by both.
+#
+# 46.4 is the floor because setup.cfg reads the version with `attr:`, which
+# from that release is resolved statically — without importing omenled, and so
+# without needing hidapi present at build time.
 
 [build-system]
-requires = ["setuptools>=45"]
+requires = ["setuptools>=46.4"]
 build-backend = "setuptools.build_meta"
 
 [tool.pytest.ini_options]

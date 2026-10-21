@@ -144,9 +144,6 @@ class TestPackagingMetadata:
         parser.read(os.path.join(ROOT, "setup.cfg"))
         return parser
 
-    def test_the_declared_version_matches_the_package(self):
-        assert self._setup_cfg()["metadata"]["version"] == omenled.__version__
-
     def test_the_console_script_points_at_a_real_callable(self):
         entry = self._setup_cfg()["options.entry_points"]["console_scripts"]
         target = entry.split("=", 1)[1].strip()
